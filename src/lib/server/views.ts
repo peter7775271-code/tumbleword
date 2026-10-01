@@ -12,6 +12,7 @@ export function toPublicPlayer(p: ServerPlayer, now: number): PublicPlayer {
     emoji: p.emoji,
     status: p.status,
     score: p.score,
+    cardCount: p.hand.length,
     connected: isPlayerConnected(p, now),
   };
 }
@@ -58,6 +59,8 @@ export function playerView(room: Room, publicRoom: PublicRoom, player: ServerPla
     kind: "player",
     room: publicRoom,
     me: { ...me, isVip: publicRoom.vipId === player.id },
+    hand: player.hand,
+    activeEffects: room.activeEffects.filter((effect) => effect.targetId === player.id),
     myWords,
     hintsLeft: room.settings.hints ? Math.max(0, HINTS_PER_ROUND - (room.round?.hintsUsed[player.id] ?? 0)) : 0,
     myMissed,

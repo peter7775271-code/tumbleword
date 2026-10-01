@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   roundSeconds: 90,
   minWords: 40,
   hints: true,
+  sabotageEnabled: true,
+  cardMinLength: 4,
 };
 
 export const SETTING_LIMITS = {

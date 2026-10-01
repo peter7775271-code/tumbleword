@@ -54,6 +54,9 @@ export function createRoom(code: string, hostToken: string, now: number): Room {
     hostLastSeenAt: now,
     round: null,
     history: [],
+    eventLog: [],
+    activeEffects: [],
+    pendingHeists: [],
     createdAt: now,
   };
 }
@@ -130,6 +133,11 @@ export function addPlayer(room: Room, input: JoinInput, now: number): JoinResult
     lastSeenAt: now,
     status: room.phase === "LOBBY" ? "active" : "spectating",
     score: 0,
+    hand: [],
+    lastCardEarnedAt: 0,
+    lastCardPlayedAt: 0,
+    personalDeadlineOffset: 0,
+    lastHitAt: 0,
   };
   room.players.push(player);
   return { player, reclaimed: false };
@@ -154,6 +162,8 @@ export function updateSettings(room: Room, patch: Partial<Settings>): void {
   if (typeof patch.roundSeconds === "number") s.roundSeconds = clamp(patch.roundSeconds, SETTING_LIMITS.roundSeconds);
   if (typeof patch.minWords === "number") s.minWords = clamp(patch.minWords, SETTING_LIMITS.minWords);
   if (typeof patch.hints === "boolean") s.hints = patch.hints;
+  if (typeof patch.sabotageEnabled === "boolean") s.sabotageEnabled = patch.sabotageEnabled;
+  if (typeof patch.cardMinLength === "number") s.cardMinLength = clamp(patch.cardMinLength, { min: 3, max: 8, step: 1 });
 }
 
 // ---------- rounds ----------
@@ -178,7 +188,17 @@ export function startGame(room: Room, gen: GeneratedBoard, now: number): void {
     throw new GameError("not_enough_players", `Need at least ${MIN_PLAYERS} players`);
   }
   room.history = [];
-  for (const p of room.players) p.score = 0;
+  room.activeEffects = [];
+  room.pendingHeists = [];
+  room.eventLog = [];
+  for (const p of room.players) {
+    p.score = 0;
+    p.hand = [];
+    p.lastCardEarnedAt = 0;
+    p.lastCardPlayedAt = 0;
+    p.personalDeadlineOffset = 0;
+    p.lastHitAt = 0;
+  }
   beginCountdown(room, 1, gen, now);
 }
 
@@ -202,9 +222,17 @@ export function playAgain(room: Room): void {
   room.phase = "LOBBY";
   room.round = null;
   room.history = [];
+  room.activeEffects = [];
+  room.pendingHeists = [];
+  room.eventLog = [];
   for (const p of room.players) {
     p.score = 0;
     p.status = "active";
+    p.hand = [];
+    p.lastCardEarnedAt = 0;
+    p.lastCardPlayedAt = 0;
+    p.personalDeadlineOffset = 0;
+    p.lastHitAt = 0;
   }
 }
 
@@ -236,6 +264,16 @@ export function finishRound(room: Room, submissions: Submission[]): void {
   for (const p of active) p.score += result.players[p.id].total;
   room.history.push(result);
   room.phase = "REVEAL";
+  room.activeEffects = [];
+  room.pendingHeists = [];
+  room.eventLog = [];
+  for (const p of room.players) {
+    p.hand = [];
+    p.lastCardEarnedAt = 0;
+    p.lastCardPlayedAt = 0;
+    p.personalDeadlineOffset = 0;
+    p.lastHitAt = 0;
+  }
 }
 
 /** Effective phase at `now` (a COUNTDOWN whose start time passed is really a ROUND). */

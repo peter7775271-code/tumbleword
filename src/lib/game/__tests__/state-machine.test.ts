@@ -96,7 +96,7 @@ describe("settings", () => {
   it("clamps values to their limits and steps", () => {
     const room = lobby();
     updateSettings(room, { rounds: 99, roundSeconds: 100, minWords: -5, hints: false });
-    expect(room.settings).toEqual({ rounds: 10, roundSeconds: 90, minWords: 0, hints: false });
+    expect(room.settings).toEqual({ rounds: 10, roundSeconds: 90, minWords: 0, hints: false, sabotageEnabled: true, cardMinLength: 4 });
   });
 
   it("cannot change mid-game", () => {

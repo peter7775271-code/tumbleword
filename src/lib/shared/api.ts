@@ -1,4 +1,4 @@
-import type { Board, Phase, PlayerFinalStats, PlayerStatus, RoundResult, Settings } from "@/lib/game/types";
+import type { ActiveEffect, Board, Phase, PlayerFinalStats, PlayerStatus, RoundResult, Settings } from "@/lib/game/types";
 
 export type Auth = { role: "host"; token: string } | { role: "player"; playerId: string; token: string };
 
@@ -9,6 +9,7 @@ export interface PublicPlayer {
   emoji: string;
   status: PlayerStatus;
   score: number;
+  cardCount: number;
   connected: boolean;
 }
 
@@ -46,6 +47,8 @@ export interface PlayerView {
   kind: "player";
   room: PublicRoom;
   me: PublicPlayer & { isVip: boolean };
+  hand: string[];
+  activeEffects: ActiveEffect[];
   /** This player's accepted words for the current round. */
   myWords: string[];
   hintsLeft: number;
@@ -81,7 +84,8 @@ export type RoomAction =
   | { type: "settings"; settings: Partial<Settings> }
   | { type: "kick"; playerId: string }
   | { type: "leave" }
-  | { type: "close" };
+  | { type: "close" }
+  | { type: "playCard"; cardId: string; targetId?: string | null };
 
 export type SubmitOutcome =
   | "accepted"

@@ -15,6 +15,8 @@ export interface Settings {
   /** Boards with fewer valid words than this are re-rolled. */
   minWords: number;
   hints: boolean;
+  sabotageEnabled: boolean;
+  cardMinLength: number;
 }
 
 export type PlayerStatus = "active" | "spectating";
@@ -29,6 +31,11 @@ export interface Player {
   /** Late joiners spectate until the next round starts. */
   status: PlayerStatus;
   score: number;
+  hand: string[];
+  lastCardEarnedAt: number;
+  lastCardPlayedAt: number;
+  personalDeadlineOffset: number;
+  lastHitAt: number;
 }
 
 /** Server-side player record. The token never leaves the server except to its owner. */
@@ -89,6 +96,24 @@ export interface Round {
   hintsUsed: Record<string, number>;
 }
 
+export interface ActiveEffect {
+  id: string;
+  cardId: string;
+  sourceId: string;
+  targetId: string;
+  startedAt: number;
+  expiresAt: number;
+  effectType: string;
+  reflected?: boolean;
+}
+
+export interface PendingHeist {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  points: number;
+}
+
 export interface Room {
   code: string;
   phase: Phase;
@@ -99,6 +124,9 @@ export interface Room {
   hostLastSeenAt: number;
   round: Round | null;
   history: RoundResult[];
+  eventLog: string[];
+  activeEffects: ActiveEffect[];
+  pendingHeists: PendingHeist[];
   createdAt: number;
 }
 
