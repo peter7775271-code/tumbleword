@@ -1,3 +1,4 @@
+import { CARD_DEFINITIONS, type CardDefinition } from "@/lib/game/cards";
 import { HINTS_PER_ROUND, MISSED_WORDS_SHOWN } from "@/lib/game/constants";
 import { effectivePhase, isHostConnected, isPlayerConnected, vipId } from "@/lib/game/state-machine";
 import { finalStats } from "@/lib/game/stats";
@@ -30,6 +31,9 @@ export function toPublicRoom(room: Room, version: number, progress: Record<strin
     round: room.round
       ? { number: room.round.number, board: room.round.board, startsAt: room.round.startsAt, endsAt: room.round.endsAt }
       : null,
+    activeEffects: Array.isArray(room.activeEffects)
+      ? room.activeEffects.map((effect) => ({ ...effect, card: CARD_DEFINITIONS[effect.cardId] ?? null }))
+      : [],
     progress: phase === "LOBBY" ? {} : progress,
     lastResult: showResult ? (room.history.at(-1) ?? null) : null,
     final: phase === "FINAL" ? finalStats(room.players, room.history) : null,
@@ -55,12 +59,20 @@ export function playerView(room: Room, publicRoom: PublicRoom, player: ServerPla
     const found = new Set(publicRoom.lastResult?.players[player.id]?.words ?? []);
     myMissed = room.round.solution.filter((w) => !found.has(w)).slice(0, MISSED_WORDS_SHOWN);
   }
+  const hand = (Array.isArray(player.hand) ? player.hand : [])
+    .map((cardId) => CARD_DEFINITIONS[cardId] ?? null)
+    .filter((card): card is CardDefinition => Boolean(card));
+
   return {
     kind: "player",
     room: publicRoom,
     me: { ...me, isVip: publicRoom.vipId === player.id },
-    hand: Array.isArray(player.hand) ? player.hand : [],
-    activeEffects: Array.isArray(room.activeEffects) ? room.activeEffects.filter((effect) => effect.targetId === player.id) : [],
+    hand,
+    activeEffects: Array.isArray(room.activeEffects)
+      ? room.activeEffects
+          .filter((effect) => effect.targetId === player.id)
+          .map((effect) => ({ ...effect, card: CARD_DEFINITIONS[effect.cardId] ?? null }))
+      : [],
     myWords,
     hintsLeft: room.settings.hints ? Math.max(0, HINTS_PER_ROUND - (room.round?.hintsUsed[player.id] ?? 0)) : 0,
     myMissed,

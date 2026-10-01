@@ -110,7 +110,7 @@ function PlayerAppInner({ initialCode }: { initialCode: string }) {
       ) : view.room.phase === "COUNTDOWN" ? (
         <PlayerCountdown view={view} />
       ) : view.room.phase === "ROUND" ? (
-        <PlayerRound key={view.room.round!.number} view={view} auth={auth} />
+        <PlayerRound key={view.room.round!.number} view={view} auth={auth} onView={conn.applyView} />
       ) : view.room.phase === "REVEAL" ? (
         <PlayerReveal view={view} auth={auth} onView={conn.applyView} />
       ) : (

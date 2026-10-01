@@ -277,7 +277,9 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId?
     resolvedTargetId = leader.id;
   }
   if (card.targeting === "all-others") {
-    resolvedTargetId = playerId;
+    const otherPlayers = room.players.filter((p) => p.id !== playerId);
+    if (otherPlayers.length === 0) return { ok: false, reason: "invalid_target" };
+    resolvedTargetId = otherPlayers[0]?.id ?? playerId;
   }
   if (card.targeting === "rival") {
     if (!resolvedTargetId || resolvedTargetId === playerId) return { ok: false, reason: "invalid_target" };
@@ -297,6 +299,60 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId?
     return { ok: false, reason: "invalid_target" };
   }
 
+  if (card.targeting === "all-others") {
+    const allTargets = room.players.filter((p) => p.id !== playerId);
+    const applied: ActiveEffect[] = [];
+
+    for (const targetPlayer of allTargets) {
+      const shield = room.activeEffects.find((effect) => effect.targetId === targetPlayer.id && effect.cardId === "shield");
+      const sameEffectType = activeEffectsForTarget(room, targetPlayer.id).some((effect) => effect.effectType === card.effectType);
+      if (sameEffectType) {
+        continue;
+      }
+      if (targetPlayer.lastHitAt && now - targetPlayer.lastHitAt < 3_000 && card.id !== "black-hole" && card.id !== "chaos-shuffle") {
+        continue;
+      }
+      if (shield && card.id !== "black-hole" && card.id !== "chaos-shuffle") {
+        room.activeEffects = room.activeEffects.filter((effect) => effect.id !== shield.id);
+        const reflectedEffect: ActiveEffect = {
+          id: `reflect-${Date.now()}-${Math.random()}`,
+          cardId: card.id,
+          sourceId: targetPlayer.id,
+          targetId: playerId,
+          startedAt: now,
+          expiresAt: now + card.durationMs,
+          effectType: card.effectType,
+          reflected: true,
+        };
+        room.activeEffects.push(reflectedEffect);
+        applied.push(reflectedEffect);
+        continue;
+      }
+
+      const effectDuration = Math.max(1_000, card.durationMs * (room.activeEffects.filter((effect) => effect.targetId === targetPlayer.id && effect.startedAt >= room.round!.startsAt).length >= 2 ? 0.6 : 1));
+      const effect: ActiveEffect = {
+        id: `${card.id}-${Date.now()}-${Math.random()}`,
+        cardId: card.id,
+        sourceId: playerId,
+        targetId: targetPlayer.id,
+        startedAt: now,
+        expiresAt: now + effectDuration,
+        effectType: card.effectType,
+      };
+      targetPlayer.lastHitAt = now;
+      room.activeEffects.push(effect);
+      applied.push(effect);
+    }
+
+    if (applied.length > 0) {
+      player.hand.splice(index, 1);
+      player.lastCardPlayedAt = now;
+      return { ok: true, effect: applied[0], card };
+    }
+
+    return { ok: false, reason: "stacked" };
+  }
+
   if (target && card.effectType !== "cleanse" && card.effectType !== "heist" && card.effectType !== "time") {
     if (recentHits >= 3) {
       return { ok: false, reason: "target_cap" };
@@ -311,7 +367,7 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId?
     }
   }
 
-  if (card.targeting === "rival" || card.targeting === "leader" || card.targeting === "all-others") {
+  if (card.targeting === "rival" || card.targeting === "leader") {
     const targetPlayer = room.players.find((p) => p.id === resolvedTargetId!);
     const shield = targetPlayer
       ? room.activeEffects.find((effect) => effect.targetId === targetPlayer.id && effect.cardId === "shield")

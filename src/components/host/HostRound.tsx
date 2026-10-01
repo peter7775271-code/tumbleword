@@ -10,7 +10,7 @@ import type { HostControls } from "./HostApp";
 
 export function HostRound({ view, connected }: HostControls) {
   const now = useServerNow(200);
-  const { round, players, progress, settings } = view.room;
+  const { round, players, progress, settings, activeEffects } = view.room;
   const countingDown = !!round && now < round.startsAt;
   const timeUp = !!round && now >= round.endsAt;
   const countdown = round ? Math.max(1, Math.ceil((round.startsAt - now) / 1000)) : 0;
@@ -58,16 +58,33 @@ export function HostRound({ view, connected }: HostControls) {
           />
         </div>
         <ul className="flex min-h-0 flex-col gap-[0.8rem] overflow-hidden" aria-label="Words found per player">
-          {ranked.map((p) => (
-            <li key={p.id} className="flex items-center gap-[1rem] rounded-[1rem] bg-ink-900/80 px-[1.2rem] py-[0.8rem] ring-1 ring-white/10">
-              <Avatar emoji={p.emoji} color={p.color} dimmed={!connected.has(p.id)} />
-              <span className="min-w-0 flex-1 truncate text-[1.8rem] font-black">{p.nickname}</span>
-              <span key={progress[p.id] ?? 0} className="animate-pop-in text-[2.4rem] font-black tabular-nums text-sky">
-                {progress[p.id] ?? 0}
-              </span>
-              <span className="text-[1.2rem] text-ink-300">words</span>
-            </li>
-          ))}
+          {ranked.map((p) => {
+            const targetEffects = activeEffects.filter((effect) => effect.targetId === p.id);
+            return (
+              <li key={p.id} className="flex items-center gap-[1rem] rounded-[1rem] bg-ink-900/80 px-[1.2rem] py-[0.8rem] ring-1 ring-white/10">
+                <Avatar emoji={p.emoji} color={p.color} dimmed={!connected.has(p.id)} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-[0.8rem]">
+                    <span className="truncate text-[1.8rem] font-black">{p.nickname}</span>
+                    <span className="rounded-full bg-ink-800 px-[0.5rem] py-[0.15rem] text-[0.9rem] font-bold text-amber">{p.cardCount} cards</span>
+                  </div>
+                  {targetEffects.length > 0 && (
+                    <div className="mt-[0.35rem] flex flex-wrap gap-[0.35rem]">
+                      {targetEffects.map((effect) => (
+                        <span key={effect.id} className="rounded-full bg-sky/15 px-[0.5rem] py-[0.15rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-sky">
+                          {effect.card?.emoji ?? "✨"} {effect.card?.name ?? effect.effectType}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <span key={progress[p.id] ?? 0} className="animate-pop-in text-[2.4rem] font-black tabular-nums text-sky">
+                  {progress[p.id] ?? 0}
+                </span>
+                <span className="text-[1.2rem] text-ink-300">words</span>
+              </li>
+            );
+          })}
         </ul>
         <p className="mt-auto text-[1.3rem] text-ink-300">
           Words found by more than one player score <span className="font-black text-flame">zero</span>. Go weird!

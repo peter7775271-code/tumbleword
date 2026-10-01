@@ -19,9 +19,10 @@ interface Props {
   onDragEnd: (path: number[]) => void;
   disabled?: boolean;
   hintTile?: number | null;
+  effects?: string[];
 }
 
-export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = false, hintTile = null }: Props) {
+export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = false, hintTile = null, effects = [] }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const pathRef = useRef(path);
   useLayoutEffect(() => {
@@ -96,6 +97,19 @@ export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = fa
     return [100 * PAD + ((i % size) + 0.5) * cell, 100 * PAD + (Math.floor(i / size) + 0.5) * cell];
   };
 
+  const effectSet = new Set(effects);
+  const boardStyle = {
+    transform: effectSet.has("spin") ? "rotate(6deg)" : effectSet.has("mirror") ? "scaleX(-1)" : undefined,
+    filter: [
+      effectSet.has("blur") ? "blur(2px)" : "",
+      effectSet.has("dark") ? "brightness(0.62) saturate(0.7)" : "",
+      effectSet.has("tiny") ? "scale(0.92)" : "",
+      effectSet.has("vortex") ? "contrast(1.2) saturate(1.4)" : "",
+    ].filter(Boolean).join(" ") || undefined,
+    animation: effectSet.has("wiggle") ? "wiggle 0.7s ease-in-out infinite" : undefined,
+    opacity: effectSet.has("vortex") ? 0.9 : undefined,
+  };
+
   return (
     <div
       ref={ref}
@@ -108,10 +122,11 @@ export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = fa
       role="grid"
       aria-label="Letter board. Drag across adjacent letters, or tap them one by one."
     >
-      <div className="grid h-full w-full" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+      <div className="grid h-full w-full" style={{ ...boardStyle, gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
         {board.tiles.map((tile, i) => {
           const selected = path.includes(i);
           const isLast = path.at(-1) === i;
+          const locked = effectSet.has("lock") && i % 2 === 0;
           return (
             <div key={i} className="p-[8%]" role="gridcell" aria-selected={selected}>
               <div
@@ -119,7 +134,8 @@ export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = fa
                   selected
                     ? "scale-95 bg-amber text-ink-950 shadow-[0_0.5cqw_0_#b37b00]"
                     : "bg-cream text-tile-ink shadow-[0_1cqw_0_var(--color-tile-edge)]"
-                } ${isLast ? "ring-4 ring-white" : ""} ${hintTile === i && !selected ? "animate-pulse-soft ring-[1.2cqw] ring-sky" : ""}`}
+                } ${isLast ? "ring-4 ring-white" : ""} ${hintTile === i && !selected ? "animate-pulse-soft ring-[1.2cqw] ring-sky" : ""} ${locked ? "opacity-55" : ""}`}
+                style={locked ? { boxShadow: "inset 0 0 0 2px rgba(255,176,0,0.7)" } : undefined}
               >
                 <span className={tile === "qu" ? "text-[9cqw]" : "text-[12cqw]"}>{tileLabel(tile)}</span>
               </div>

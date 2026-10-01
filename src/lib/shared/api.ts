@@ -1,3 +1,4 @@
+import type { CardDefinition } from "@/lib/game/cards";
 import type { ActiveEffect, Board, Phase, PlayerFinalStats, PlayerStatus, RoundResult, Settings } from "@/lib/game/types";
 
 export type Auth = { role: "host"; token: string } | { role: "player"; playerId: string; token: string };
@@ -29,6 +30,7 @@ export interface PublicRoom {
   hostConnected: boolean;
   vipId: string | null;
   round: PublicRound | null;
+  activeEffects: ActiveEffectView[];
   /** Words found so far this round, per player (counts only). */
   progress: Record<string, number>;
   /** The latest scored round (REVEAL and FINAL). */
@@ -43,12 +45,16 @@ export interface HostView {
   room: PublicRoom;
 }
 
+export interface ActiveEffectView extends ActiveEffect {
+  card: CardDefinition | null;
+}
+
 export interface PlayerView {
   kind: "player";
   room: PublicRoom;
   me: PublicPlayer & { isVip: boolean };
-  hand: string[];
-  activeEffects: ActiveEffect[];
+  hand: CardDefinition[];
+  activeEffects: ActiveEffectView[];
   /** This player's accepted words for the current round. */
   myWords: string[];
   hintsLeft: number;

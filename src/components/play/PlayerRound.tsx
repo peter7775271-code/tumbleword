@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { wordFromPath } from "@/lib/game/board";
 import { MIN_WORD_LENGTH } from "@/lib/game/constants";
 import { scoreWord } from "@/lib/game/scoring";
@@ -29,7 +29,7 @@ interface Feedback {
   id: number;
 }
 
-export function PlayerRound({ view, auth }: { view: PlayerView; auth: Auth }) {
+export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void }) {
   const round = view.room.round!;
   const now = useServerNow(200);
   const [path, setPath] = useState<number[]>([]);
@@ -37,12 +37,18 @@ export function PlayerRound({ view, auth }: { view: PlayerView; auth: Auth }) {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [hint, setHint] = useState<{ round: number; hint: Hint } | null>(null);
   const [hintsLeft, setHintsLeft] = useState<number | null>(null);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(view.hand[0]?.id ?? null);
 
   // Server list (survives reloads) merged with words accepted since the last sync.
   const words = [...new Set([...view.myWords, ...accepted])];
   const timeUp = now >= round.endsAt;
   const word = wordFromPath(round.board, path);
   const activeHint = hint?.round === round.number ? hint.hint : null;
+  const selectedCard = useMemo(() => view.hand.find((card) => card.id === selectedCardId) ?? null, [selectedCardId, view.hand]);
+  const rivalPlayers = useMemo(
+    () => view.room.players.filter((player) => player.id !== view.me.id),
+    [view.me.id, view.room.players],
+  );
 
   const say = (good: boolean, text: string) => {
     setFeedback({ good, text, id: Date.now() });
@@ -82,6 +88,20 @@ export function PlayerRound({ view, auth }: { view: PlayerView; auth: Auth }) {
     }
   };
 
+  const playSelectedCard = async (targetId?: string | null) => {
+    if (!selectedCard || timeUp) return;
+    try {
+      const res = await api.act(view.room.code, auth, { type: "playCard", cardId: selectedCard.id, targetId });
+      if ("room" in res) onView(res as PlayerView);
+      setSelectedCardId(null);
+      const nextCard = view.hand.find((card) => card.id !== selectedCard.id) ?? null;
+      setSelectedCardId(nextCard?.id ?? null);
+      say(true, `${selectedCard.emoji} ${selectedCard.name} played`);
+    } catch (err) {
+      say(false, err instanceof ApiClientError ? err.message : "Card could not be played");
+    }
+  };
+
   const left = hintsLeft ?? view.hintsLeft;
 
   return (
@@ -111,6 +131,62 @@ export function PlayerRound({ view, auth }: { view: PlayerView; auth: Auth }) {
         )}
       </div>
 
+      {view.activeEffects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {view.activeEffects.map((effect) => (
+            <span key={effect.id} className="rounded-full bg-ink-800 px-2 py-1 text-xs font-bold text-amber">
+              {effect.card?.emoji ?? "✨"} {effect.card?.name ?? effect.effectType}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {view.hand.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest text-ink-300">
+            <span>Cards</span>
+            <span>{view.hand.length} in hand</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {view.hand.map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => {
+                  if (card.targeting === "rival" || card.targeting === "leader") {
+                    setSelectedCardId(card.id);
+                    return;
+                  }
+                  setSelectedCardId(card.id);
+                  if (card.targeting === "self") void playSelectedCard(view.me.id);
+                  else void playSelectedCard();
+                }}
+                className={`rounded-xl border px-2 py-2 text-left transition ${
+                  selectedCard?.id === card.id ? "border-amber bg-amber/10 text-amber" : "border-ink-700 bg-ink-800 text-ink-100"
+                }`}
+              >
+                <div className="text-lg">{card.emoji}</div>
+                <div className="text-xs font-bold uppercase">{card.name}</div>
+              </button>
+            ))}
+          </div>
+          {selectedCard && (selectedCard.targeting === "rival" || selectedCard.targeting === "leader") && rivalPlayers.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {rivalPlayers.map((player) => (
+                <button
+                  key={player.id}
+                  type="button"
+                  onClick={() => void playSelectedCard(player.id)}
+                  className="rounded-full bg-sky/15 px-2 py-1 text-xs font-bold text-sky"
+                >
+                  {player.nickname}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <SwipeBoard
         board={round.board}
         path={path}
@@ -118,6 +194,7 @@ export function PlayerRound({ view, auth }: { view: PlayerView; auth: Auth }) {
         onDragEnd={submit}
         disabled={timeUp}
         hintTile={activeHint?.start ?? null}
+        effects={view.activeEffects.map((effect) => effect.effectType)}
       />
 
       <div className="grid grid-cols-3 gap-3">
