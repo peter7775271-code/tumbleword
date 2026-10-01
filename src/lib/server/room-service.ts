@@ -15,6 +15,7 @@ import {
   finishRound,
   hasNextRound,
   isRoundOver,
+  normalizeRoom,
   playAgain,
   removePlayer,
   startGame,
@@ -63,6 +64,10 @@ export function createRoomService(deps: RoomServiceDeps) {
   async function load(code: string) {
     const stored = await store.getRoom(code);
     if (!stored) throw new GameError("room_not_found", "Room not found. Check the code?", 404);
+    const normalized = normalizeRoom(stored.room);
+    if (JSON.stringify(normalized) !== JSON.stringify(stored.room)) {
+      stored.room = normalized;
+    }
     return stored;
   }
 

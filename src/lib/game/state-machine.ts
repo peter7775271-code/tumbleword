@@ -61,6 +61,34 @@ export function createRoom(code: string, hostToken: string, now: number): Room {
   };
 }
 
+export function normalizeRoom(room: Partial<Room> & Pick<Room, "players" | "code" | "phase" | "settings">): Room {
+  const settings = { ...DEFAULT_SETTINGS, ...(room.settings ?? {}) };
+  const players = (room.players ?? []).map((player) => ({
+    ...player,
+    hand: Array.isArray(player.hand) ? player.hand : [],
+    lastCardEarnedAt: Number.isFinite(player.lastCardEarnedAt) ? player.lastCardEarnedAt : 0,
+    lastCardPlayedAt: Number.isFinite(player.lastCardPlayedAt) ? player.lastCardPlayedAt : 0,
+    personalDeadlineOffset: Number.isFinite(player.personalDeadlineOffset) ? player.personalDeadlineOffset : 0,
+    lastHitAt: Number.isFinite(player.lastHitAt) ? player.lastHitAt : 0,
+  }));
+
+  return {
+    code: room.code,
+    phase: room.phase ?? "LOBBY",
+    settings,
+    players,
+    kickedIds: Array.isArray(room.kickedIds) ? room.kickedIds : [],
+    hostToken: room.hostToken ?? "",
+    hostLastSeenAt: Number.isFinite(room.hostLastSeenAt) ? room.hostLastSeenAt! : 0,
+    round: room.round ?? null,
+    history: Array.isArray(room.history) ? room.history : [],
+    eventLog: Array.isArray(room.eventLog) ? room.eventLog : [],
+    activeEffects: Array.isArray(room.activeEffects) ? room.activeEffects : [],
+    pendingHeists: Array.isArray(room.pendingHeists) ? room.pendingHeists : [],
+    createdAt: Number.isFinite(room.createdAt) ? room.createdAt! : Date.now(),
+  };
+}
+
 // ---------- presence ----------
 
 export const isPlayerConnected = (p: ServerPlayer, now: number) => now - p.lastSeenAt < PLAYER_TIMEOUT_MS;
