@@ -1,7 +1,7 @@
 import { GameError } from "@/lib/game/state-machine";
 import type { Settings } from "@/lib/game/types";
 import type { RoomAction } from "@/lib/shared/api";
-import { parseAuth, route, str } from "@/lib/server/http";
+import { optStr, parseAuth, route, str } from "@/lib/server/http";
 import { getRoomService } from "@/lib/server/service";
 
 function parseAction(value: unknown): RoomAction {
@@ -22,8 +22,12 @@ function parseAction(value: unknown): RoomAction {
       if (typeof s.roundSeconds === "number") settings.roundSeconds = s.roundSeconds;
       if (typeof s.minWords === "number") settings.minWords = s.minWords;
       if (typeof s.hints === "boolean") settings.hints = s.hints;
+      if (typeof s.sabotageEnabled === "boolean") settings.sabotageEnabled = s.sabotageEnabled;
+      if (typeof s.cardMinLength === "number") settings.cardMinLength = s.cardMinLength;
       return { type: "settings", settings };
     }
+    case "playCard":
+      return { type: "playCard", cardId: str(v.cardId, "cardId", 64), targetId: optStr(v.targetId, "targetId", 64) ?? null };
     default:
       throw new GameError("bad_request", "Unknown action");
   }

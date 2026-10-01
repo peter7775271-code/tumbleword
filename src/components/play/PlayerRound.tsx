@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { wordFromPath } from "@/lib/game/board";
+import { TIER_STYLE, getCard, type CardDefinition } from "@/lib/game/cards";
 import { MIN_WORD_LENGTH } from "@/lib/game/constants";
 import { scoreWord } from "@/lib/game/scoring";
 import type { Auth, Hint, PlayerView, SubmitOutcome } from "@/lib/shared/api";
 import { ApiClientError, api } from "@/lib/client/api";
+import { useCalmEffects } from "@/lib/client/calm";
 import { vibrate } from "@/lib/client/haptics";
 import { useServerNow } from "@/lib/client/hooks";
 import { play } from "@/lib/client/sound";
 import { Timer } from "../Timer";
 import { Button } from "../ui";
+import { CardTray } from "./CardTray";
+import { composeEffects } from "./effects";
+import { EffectChips, alertFor, type SabotageAlert } from "./SabotageStatus";
 import { SwipeBoard } from "./SwipeBoard";
 
 const MESSAGES: Record<Exclude<SubmitOutcome, "accepted">, string> = {
@@ -29,26 +34,55 @@ interface Feedback {
   id: number;
 }
 
-export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void }) {
+type Pop = { id: number; card: CardDefinition } | { id: number; cashIn: number };
+
+export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void; refresh: () => Promise<void> }) {
   const round = view.room.round!;
   const now = useServerNow(200);
+  const calm = useCalmEffects();
   const [path, setPath] = useState<number[]>([]);
   const [accepted, setAccepted] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [hint, setHint] = useState<{ round: number; hint: Hint } | null>(null);
   const [hintsLeft, setHintsLeft] = useState<number | null>(null);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(view.hand[0]?.id ?? null);
+  const [pop, setPop] = useState<Pop | null>(null);
 
   // Server list (survives reloads) merged with words accepted since the last sync.
   const words = [...new Set([...view.myWords, ...accepted])];
-  const timeUp = now >= round.endsAt;
+  const deadline = view.sabotage.deadline ?? round.endsAt;
+  const timeUp = now >= deadline;
   const word = wordFromPath(round.board, path);
   const activeHint = hint?.round === round.number ? hint.hint : null;
-  const selectedCard = useMemo(() => view.hand.find((card) => card.id === selectedCardId) ?? null, [selectedCardId, view.hand]);
-  const rivalPlayers = useMemo(
-    () => view.room.players.filter((player) => player.id !== view.me.id),
-    [view.me.id, view.room.players],
-  );
+  const myEffects = view.room.activeEffects.filter((e) => e.targetId === view.me.id && e.expiresAt > now);
+  const previewStyle = composeEffects(myEffects, now, calm, round.board.size).previewStyle;
+
+  // "Clock stolen" flash whenever my deadline moves earlier.
+  const stolen = view.sabotage.clockStolenMs;
+  const [lastStolen, setLastStolen] = useState(stolen);
+  const [clockFlash, setClockFlash] = useState<{ total: number; delta: number } | null>(null);
+  if (stolen !== lastStolen) {
+    setLastStolen(stolen);
+    if (stolen > lastStolen) setClockFlash({ total: stolen, delta: stolen - lastStolen });
+  }
+
+  // Alerts for sabotage involving me. Events already in the feed when this screen mounted are not replayed.
+  const [seen, setSeen] = useState(() => new Set(view.room.events.map((e) => e.id)));
+  const [alert, setAlert] = useState<SabotageAlert | null>(null);
+  const fresh = view.room.events.filter((e) => !seen.has(e.id));
+  if (fresh.length > 0) {
+    setSeen(new Set([...seen, ...fresh.map((e) => e.id)]));
+    const latest = fresh.map((e) => alertFor(e, view.me.id, view.room.players)).filter((a) => !!a).at(-1);
+    if (latest) setAlert(latest);
+  }
+
+  useEffect(() => {
+    if (!alert) return;
+    vibrate(alert.tone === "good" ? "success" : "hit");
+    play(alert.tone === "good" ? "shield" : "hit");
+  }, [alert]);
+  useEffect(() => {
+    if (clockFlash) vibrate("hit");
+  }, [clockFlash]);
 
   const say = (good: boolean, text: string) => {
     setFeedback({ good, text, id: Date.now() });
@@ -64,11 +98,16 @@ export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Au
     if (words.includes(w)) return say(false, MESSAGES.duplicate);
     try {
       const res = await api.submit(view.room.code, auth, w, p);
-      if (res.outcome === "accepted") {
-        setAccepted((a) => [...a, res.word]);
-        say(true, `+${res.points}  ${res.word.toUpperCase()}`);
-      } else {
-        say(false, MESSAGES[res.outcome]);
+      if (res.outcome !== "accepted") return say(false, MESSAGES[res.outcome]);
+      setAccepted((a) => [...a, res.word]);
+      say(true, `+${res.points}  ${res.word.toUpperCase()}${res.bounty ? "  👑+1" : ""}`);
+      const reward = res.reward;
+      if (reward) {
+        const card = reward.kind === "card" ? getCard(reward.cardId) : null;
+        setPop(card ? { id: Date.now(), card } : { id: Date.now(), cashIn: reward.kind === "cashIn" ? reward.points : 0 });
+        vibrate("card");
+        play("card");
+        void refresh();
       }
     } catch (err) {
       say(false, err instanceof ApiClientError ? err.message : "Couldn't send, try again");
@@ -88,40 +127,51 @@ export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Au
     }
   };
 
-  const playSelectedCard = async (targetId?: string | null) => {
-    if (!selectedCard || timeUp) return;
+  const playCard = async (card: CardDefinition, targetId: string | null): Promise<boolean> => {
+    vibrate("play");
+    play("zap");
     try {
-      const res = await api.act(view.room.code, auth, { type: "playCard", cardId: selectedCard.id, targetId });
+      const res = await api.act(view.room.code, auth, { type: "playCard", cardId: card.id, targetId });
       if ("room" in res) onView(res as PlayerView);
-      setSelectedCardId(null);
-      const nextCard = view.hand.find((card) => card.id !== selectedCard.id) ?? null;
-      setSelectedCardId(nextCard?.id ?? null);
-      say(true, `${selectedCard.emoji} ${selectedCard.name} played`);
+      const target = targetId ? view.room.players.find((p) => p.id === targetId)?.nickname : null;
+      setFeedback({ good: true, text: `${card.emoji} ${card.name}${target ? ` → ${target}` : ""}`, id: Date.now() });
+      return true;
     } catch (err) {
       say(false, err instanceof ApiClientError ? err.message : "Card could not be played");
+      return false;
     }
   };
 
   const left = hintsLeft ?? view.hintsLeft;
+  const sabotage = view.room.settings.sabotageEnabled;
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-3 px-4 pb-4 pt-3">
-      <div className="flex items-center gap-3 text-xl">
-        <Timer endsAt={round.endsAt} durationMs={round.endsAt - round.startsAt} now={now} className="flex-1" />
+    <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-3 px-4 pt-3">
+      <div className="relative flex items-center gap-3 text-xl">
+        <Timer endsAt={deadline} durationMs={round.endsAt - round.startsAt} now={now} className="flex-1" />
         <span className="rounded-full bg-ink-800 px-3 py-1 text-base font-bold" aria-label={`${words.length} words found`}>
           {words.length} 📝
         </span>
+        {clockFlash && (
+          <span
+            key={clockFlash.total}
+            role="status"
+            className="pointer-events-none absolute left-1/3 top-full z-30 animate-flash rounded-full bg-flame px-3 py-1 text-base font-black text-ink-950 shadow-lg"
+          >
+            ⏰ Clock stolen −{clockFlash.delta / 1000}s
+          </span>
+        )}
       </div>
 
       <div className="flex h-16 items-center justify-center" aria-live="polite">
         {path.length > 0 ? (
-          <span className="text-4xl font-black tracking-widest">{word.toUpperCase()}</span>
+          <span className="text-4xl font-black tracking-widest" style={previewStyle}>
+            {word.toUpperCase()}
+          </span>
         ) : feedback ? (
           <span
             key={feedback.id}
-            className={`animate-pop-in rounded-full px-4 py-2 text-xl font-black ${
-              feedback.good ? "bg-sky text-ink-950" : "animate-shake bg-flame text-ink-950"
-            }`}
+            className={`animate-pop-in rounded-full px-4 py-2 text-xl font-black ${feedback.good ? "bg-sky text-ink-950" : "animate-shake bg-flame text-ink-950"}`}
           >
             {feedback.good ? "✓ " : "✕ "}
             {feedback.text}
@@ -131,71 +181,33 @@ export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Au
         )}
       </div>
 
-      {view.activeEffects.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {view.activeEffects.map((effect) => (
-            <span key={effect.id} className="rounded-full bg-ink-800 px-2 py-1 text-xs font-bold text-amber">
-              {effect.card?.emoji ?? "✨"} {effect.card?.name ?? effect.effectType}
-            </span>
-          ))}
-        </div>
-      )}
+      {sabotage && <EffectChips effects={myEffects} now={now} immuneUntil={view.sabotage.immuneUntil} clockStolenMs={stolen} />}
 
-      {view.hand.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest text-ink-300">
-            <span>Cards</span>
-            <span>{view.hand.length} in hand</span>
+      <div className="relative">
+        <SwipeBoard
+          board={round.board}
+          path={path}
+          onPathChange={setPath}
+          onDragEnd={submit}
+          disabled={timeUp}
+          hintTile={activeHint?.start ?? null}
+          effects={myEffects}
+          now={now}
+          calm={calm}
+        />
+        {alert && (
+          <div
+            key={alert.id}
+            role="status"
+            className={`pointer-events-none absolute inset-x-2 top-2 z-10 animate-card-pop rounded-2xl px-3 py-2 text-center text-base font-black shadow-xl ${
+              alert.tone === "good" ? "bg-mint text-ink-950" : "bg-flame text-ink-950"
+            }`}
+          >
+            <span aria-hidden>{alert.emoji}</span> {alert.text}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {view.hand.map((card) => (
-              <button
-                key={card.id}
-                type="button"
-                onClick={() => {
-                  if (card.targeting === "rival" || card.targeting === "leader") {
-                    setSelectedCardId(card.id);
-                    return;
-                  }
-                  setSelectedCardId(card.id);
-                  if (card.targeting === "self") void playSelectedCard(view.me.id);
-                  else void playSelectedCard();
-                }}
-                className={`rounded-xl border px-2 py-2 text-left transition ${
-                  selectedCard?.id === card.id ? "border-amber bg-amber/10 text-amber" : "border-ink-700 bg-ink-800 text-ink-100"
-                }`}
-              >
-                <div className="text-lg">{card.emoji}</div>
-                <div className="text-xs font-bold uppercase">{card.name}</div>
-              </button>
-            ))}
-          </div>
-          {selectedCard && (selectedCard.targeting === "rival" || selectedCard.targeting === "leader") && rivalPlayers.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {rivalPlayers.map((player) => (
-                <button
-                  key={player.id}
-                  type="button"
-                  onClick={() => void playSelectedCard(player.id)}
-                  className="rounded-full bg-sky/15 px-2 py-1 text-xs font-bold text-sky"
-                >
-                  {player.nickname}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <SwipeBoard
-        board={round.board}
-        path={path}
-        onPathChange={setPath}
-        onDragEnd={submit}
-        disabled={timeUp}
-        hintTile={activeHint?.start ?? null}
-        effects={view.activeEffects.map((effect) => effect.effectType)}
-      />
+        )}
+        {pop && <CardPop key={pop.id} pop={pop} />}
+      </div>
 
       <div className="grid grid-cols-3 gap-3">
         <Button variant="secondary" className="py-4 text-xl" onClick={() => setPath([])} disabled={path.length === 0}>
@@ -215,13 +227,44 @@ export function PlayerRound({ view, auth, onView }: { view: PlayerView; auth: Au
         </Button>
       </div>
 
-      <ul className="flex flex-wrap content-start gap-2 overflow-y-auto" aria-label="Your words">
+      <ul className="flex flex-wrap content-start gap-2 pb-4" aria-label="Your words">
         {[...words].reverse().map((w) => (
           <li key={w} className="rounded-lg bg-ink-800 px-2 py-1 text-sm font-bold uppercase">
             {w} <span className="text-amber">{scoreWord(w)}</span>
           </li>
         ))}
       </ul>
+
+      {sabotage && <CardTray view={view} now={now} onPlay={playCard} />}
+    </div>
+  );
+}
+
+/** "+ card" moment: tier color, icon and text together. */
+function CardPop({ pop }: { pop: Pop }) {
+  if ("cashIn" in pop) {
+    return (
+      <div role="status" className="pointer-events-none absolute inset-x-6 bottom-3 z-10 animate-card-pop rounded-2xl bg-amber px-3 py-2 text-center text-base font-black text-ink-950 shadow-xl">
+        🃏 Hand full, cashed in for +{pop.cashIn}
+      </div>
+    );
+  }
+  const tier = TIER_STYLE[pop.card.tier];
+  return (
+    <div
+      role="status"
+      className="pointer-events-none absolute inset-x-6 bottom-3 z-10 flex animate-card-pop items-center gap-3 rounded-2xl border-4 bg-ink-900 px-3 py-2 shadow-xl"
+      style={{ borderColor: tier.color }}
+    >
+      <span className="text-4xl" aria-hidden>
+        {pop.card.emoji}
+      </span>
+      <span className="flex flex-col">
+        <span className="text-xs font-black uppercase tracking-widest" style={{ color: tier.color }}>
+          + Card · {tier.symbol} {tier.label}
+        </span>
+        <span className="text-lg font-black">{pop.card.name}</span>
+      </span>
     </div>
   );
 }

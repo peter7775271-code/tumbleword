@@ -5,12 +5,13 @@ import { useServerNow } from "@/lib/client/hooks";
 import { play } from "@/lib/client/sound";
 import { BoardView } from "../BoardView";
 import { Timer } from "../Timer";
-import { Avatar } from "../ui";
 import type { HostControls } from "./HostApp";
+import { CardPips, EffectIcons, EventFeed, LegendaryBanner, SabotageAvatar } from "./SabotageHost";
 
 export function HostRound({ view, connected }: HostControls) {
   const now = useServerNow(200);
-  const { round, players, progress, settings, activeEffects } = view.room;
+  const { round, players, progress, settings, activeEffects, events } = view.room;
+  const sabotage = settings.sabotageEnabled;
   const countingDown = !!round && now < round.startsAt;
   const timeUp = !!round && now >= round.endsAt;
   const countdown = round ? Math.max(1, Math.ceil((round.startsAt - now) / 1000)) : 0;
@@ -57,24 +58,24 @@ export function HostRound({ view, connected }: HostControls) {
             className="mt-[0.5rem] text-[4rem] [&>div:first-child]:h-[1.2rem]"
           />
         </div>
-        <ul className="flex min-h-0 flex-col gap-[0.8rem] overflow-hidden" aria-label="Words found per player">
+        <ul className="flex min-h-0 flex-col gap-[0.8rem] overflow-hidden pt-[0.6rem]" aria-label="Words found per player">
           {ranked.map((p) => {
-            const targetEffects = activeEffects.filter((effect) => effect.targetId === p.id);
+            const mine = activeEffects.filter((e) => e.targetId === p.id && e.expiresAt > now);
+            const shielded = mine.some((e) => e.effectType === "shield");
+            const wanted = mine.some((e) => e.effectType === "bounty");
             return (
-              <li key={p.id} className="flex items-center gap-[1rem] rounded-[1rem] bg-ink-900/80 px-[1.2rem] py-[0.8rem] ring-1 ring-white/10">
-                <Avatar emoji={p.emoji} color={p.color} dimmed={!connected.has(p.id)} />
+              <li key={p.id} className={`flex items-center gap-[1rem] rounded-[1rem] bg-ink-900/80 px-[1.2rem] py-[0.8rem] ring-1 ${wanted ? "ring-[0.2rem] ring-amber" : "ring-white/10"}`}>
+                <SabotageAvatar player={p} dimmed={!connected.has(p.id)} shielded={sabotage && shielded} wanted={sabotage && wanted} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-[0.8rem]">
                     <span className="truncate text-[1.8rem] font-black">{p.nickname}</span>
-                    <span className="rounded-full bg-ink-800 px-[0.5rem] py-[0.15rem] text-[0.9rem] font-bold text-amber">{p.cardCount} cards</span>
+                    {sabotage && wanted && <span className="rounded-full bg-amber px-[0.6rem] py-[0.1rem] text-[1rem] font-black tracking-[0.15em] text-ink-950">👑 BOUNTY</span>}
+                    {sabotage && shielded && <span className="sr-only">shielded</span>}
                   </div>
-                  {targetEffects.length > 0 && (
-                    <div className="mt-[0.35rem] flex flex-wrap gap-[0.35rem]">
-                      {targetEffects.map((effect) => (
-                        <span key={effect.id} className="rounded-full bg-sky/15 px-[0.5rem] py-[0.15rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-sky">
-                          {effect.card?.emoji ?? "✨"} {effect.card?.name ?? effect.effectType}
-                        </span>
-                      ))}
+                  {sabotage && (
+                    <div className="mt-[0.35rem] flex flex-wrap items-center gap-[0.8rem]">
+                      <CardPips count={p.cardCount} />
+                      <EffectIcons effects={mine} now={now} />
                     </div>
                   )}
                 </div>
@@ -86,10 +87,14 @@ export function HostRound({ view, connected }: HostControls) {
             );
           })}
         </ul>
-        <p className="mt-auto text-[1.3rem] text-ink-300">
-          Words found by more than one player score <span className="font-black text-flame">zero</span>. Go weird!
-        </p>
+        <div className="mt-auto flex flex-col gap-[0.8rem]">
+          {sabotage && <EventFeed events={events} players={players} />}
+          <p className="text-[1.3rem] text-ink-300">
+            Words found by more than one player score <span className="font-black text-flame">zero</span>. Go weird!
+          </p>
+        </div>
       </aside>
+      {sabotage && <LegendaryBanner events={events} players={players} />}
     </div>
   );
 }

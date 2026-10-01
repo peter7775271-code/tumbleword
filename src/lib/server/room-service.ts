@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { HEARTBEAT_WRITE_MS, HINTS_PER_ROUND, MIN_WORD_LENGTH, ROOM_INACTIVE_MS, SUBMIT_GRACE_MS } from "@/lib/game/constants";
-import { awardCard, playCard, resolveHeist } from "@/lib/game/cards";
 import { generateBoard, type GeneratedBoard } from "@/lib/game/generator";
+import { applyBounty, awardCard, personalDeadline, playCard } from "@/lib/game/sabotage";
 import { scoreWord } from "@/lib/game/scoring";
 import { findPath, pathSpells } from "@/lib/game/solver";
 import {
@@ -47,6 +47,8 @@ export interface RoomServiceDeps {
   newPlayerId: () => string;
   newToken: () => string;
   now?: () => number;
+  /** Randomness for card draws and effect placement (seeded in tests). */
+  rng?: () => number;
 }
 
 const MAX_WRITE_RETRIES = 8;
@@ -60,15 +62,12 @@ function tokensMatch(a: string, b: string): boolean {
 export function createRoomService(deps: RoomServiceDeps) {
   const { store } = deps;
   const clock = deps.now ?? Date.now;
+  const rng = deps.rng ?? Math.random;
 
   async function load(code: string) {
     const stored = await store.getRoom(code);
     if (!stored) throw new GameError("room_not_found", "Room not found. Check the code?", 404);
-    const normalized = normalizeRoom(stored.room);
-    if (JSON.stringify(normalized) !== JSON.stringify(stored.room)) {
-      stored.room = normalized;
-    }
-    return stored;
+    return { room: normalizeRoom(stored.room), version: stored.version };
   }
 
   function authenticate(room: Room, auth: Auth): { actor: Actor; player: ServerPlayer | null } {
@@ -90,7 +89,6 @@ export function createRoomService(deps: RoomServiceDeps) {
     advanceTime(room, now);
     if (isRoundOver(room, now)) {
       finishRound(room, await store.listSubmissions(room.code, room.round!.number));
-      resolveHeist(room);
     }
   }
 
@@ -190,9 +188,14 @@ export function createRoomService(deps: RoomServiceDeps) {
 
       // Boards are generated outside the write loop so retries don't re-roll them.
       let board: GeneratedBoard | null = null;
+      let progress: Record<string, number> = {};
       if (action.type === "start" || action.type === "next") {
         const { room } = await load(code);
         board = await newBoard(room);
+      }
+      if (action.type === "playCard") {
+        const { room } = await load(code);
+        if (room.round) progress = await store.countSubmissions(code, room.round.number);
       }
 
       const { room, version, now } = await mutate(code, (room, now) => {
@@ -204,20 +207,14 @@ export function createRoomService(deps: RoomServiceDeps) {
         }
         if (action.type === "playCard") {
           if (!player) throw new GameError("forbidden", "Only players can play cards", 403);
-          const result = playCard(room, player.id, action.cardId, action.targetId ?? null, now);
-          if (!result.ok) throw new GameError("card_failed", result.reason ?? "Card could not be played", 400);
-          return result;
+          const result = playCard(room, player.id, action.cardId, action.targetId ?? null, now, { progress, rng });
+          if (!result.ok) throw new GameError(result.reason, result.message, 409);
+          return;
         }
         if (!canControl(room, actor, now)) throw new GameError("forbidden", "Only the host can do that", 403);
         switch (action.type) {
           case "start":
             startGame(room, board!, now);
-            for (const p of room.players) {
-              p.hand = [];
-              p.lastCardEarnedAt = 0;
-              p.lastCardPlayedAt = 0;
-              p.personalDeadlineOffset = 0;
-            }
             break;
           case "next":
             advanceFromReveal(room, hasNextRound(room) ? board : null, now);
@@ -250,28 +247,30 @@ export function createRoomService(deps: RoomServiceDeps) {
       const round = room.round;
 
       if (phase === "COUNTDOWN") return reply("not_started");
-      if (phase !== "ROUND" || !round || now > round.endsAt + SUBMIT_GRACE_MS) return reply("round_over");
+      // Clock Thief moves this player's deadline earlier; the shared board and word rules never change.
+      if (phase !== "ROUND" || !round || now > personalDeadline(round, player.sabotage) + SUBMIT_GRACE_MS) return reply("round_over");
       if (player.status !== "active") return reply("not_playing");
       if (word.length < MIN_WORD_LENGTH) return reply("too_short");
       const onBoard = path ? pathSpells(round.board, path, word) : findPath(round.board, word) !== null;
       if (!onBoard) return reply("not_on_board");
       if (!(await deps.dictionary()).has(word)) return reply("not_a_word");
 
-      const effectiveDeadline = round.endsAt - player.personalDeadlineOffset;
-      if (now > effectiveDeadline + SUBMIT_GRACE_MS) return reply("round_over");
-
       const added = await store.addSubmission(code, { round: round.number, playerId: player.id, word, submittedAt: now });
       if (added.status === "duplicate") return reply("duplicate", added.count);
       await deps.broadcast(code, { type: "progress", playerId: player.id, count: added.count });
 
-      const points = scoreWord(word);
-      if (word.length >= room.settings.cardMinLength && room.settings.sabotageEnabled) {
-        await mutate(code, (room, now) => {
-          const reward = awardCard(room, player.id, word, now);
-          return reward;
-        });
-      }
-      return reply("accepted", added.count, points);
+      const res = reply("accepted", added.count, scoreWord(word));
+      if (!room.settings.sabotageEnabled) return res;
+      const { result } = await mutate(code, (room, now) => {
+        if (room.phase !== "ROUND" || room.round?.number !== round.number) return null;
+        const award = awardCard(room, player.id, word, now, rng);
+        const bounty = applyBounty(room, player.id, word, now);
+        return { award, bounty };
+      });
+      if (result?.award.kind === "card") res.reward = { kind: "card", cardId: result.award.cardId };
+      if (result?.award.kind === "cashIn") res.reward = { kind: "cashIn", points: result.award.points };
+      if (result?.bounty) res.bounty = true;
+      return res;
     },
 
     async hint(code: string, auth: Auth): Promise<HintResponse> {

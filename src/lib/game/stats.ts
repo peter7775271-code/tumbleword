@@ -14,7 +14,16 @@ export function finalStats(players: StatsPlayer[], history: RoundResult[]): Play
     let uniqueWords = 0;
     let longestWord: string | null = null;
     let bestWord: PlayerFinalStats["bestWord"] = null;
+    let cardsPlayed = 0;
+    let hitsTaken = 0;
+    let reflects = 0;
     for (const round of history) {
+      const card = round.sabotage?.players[p.id];
+      if (card) {
+        cardsPlayed += card.played;
+        hitsTaken += card.hits;
+        reflects += card.reflects;
+      }
       const r = round.players[p.id];
       if (!r) continue;
       wordsFound += r.words.length;
@@ -29,7 +38,7 @@ export function finalStats(players: StatsPlayer[], history: RoundResult[]): Play
         }
       }
     }
-    return { playerId: p.id, nickname: p.nickname, rank: 0, score: p.score, wordsFound, uniqueWords, longestWord, bestWord };
+    return { playerId: p.id, nickname: p.nickname, rank: 0, score: p.score, wordsFound, uniqueWords, longestWord, bestWord, cardsPlayed, hitsTaken, reflects };
   });
 
   rows.sort((a, b) => b.score - a.score || b.uniqueWords - a.uniqueWords || a.nickname.localeCompare(b.nickname));
@@ -45,5 +54,8 @@ export function finalStats(players: StatsPlayer[], history: RoundResult[]): Play
     uniqueWords: r.uniqueWords,
     longestWord: r.longestWord,
     bestWord: r.bestWord,
+    cardsPlayed: r.cardsPlayed,
+    hitsTaken: r.hitsTaken,
+    reflects: r.reflects,
   }));
 }

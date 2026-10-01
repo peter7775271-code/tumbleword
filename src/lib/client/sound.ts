@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 
 /** Tiny synthesized sound effects (no audio assets), with a persisted mute toggle. */
 
-export type Sound = "tap" | "good" | "bad" | "tick" | "start" | "end" | "cancel" | "point" | "fanfare";
+export type Sound = "tap" | "good" | "bad" | "tick" | "start" | "end" | "cancel" | "point" | "fanfare" | "card" | "zap" | "hit" | "shield" | "sting" | "coins";
 
 const MUTE_KEY = "tumbleword:muted";
 const listeners = new Set<() => void>();
@@ -56,6 +56,12 @@ const SOUNDS: Record<Sound, Note[]> = {
   cancel: [[300, 0, 0.18, "sawtooth", 0.08], [200, 0.12, 0.25, "sawtooth", 0.08]],
   point: [[880, 0, 0.06, "triangle", 0.12]],
   fanfare: [[523, 0, 0.12], [659, 0.12, 0.12], [784, 0.24, 0.12], [1047, 0.36, 0.4]],
+  card: [[988, 0, 0.06, "triangle", 0.14], [1319, 0.06, 0.14, "triangle", 0.14]],
+  zap: [[880, 0, 0.05, "square", 0.06], [440, 0.05, 0.12, "sawtooth", 0.07]],
+  hit: [[330, 0, 0.1, "sawtooth", 0.08], [247, 0.08, 0.18, "square", 0.06]],
+  shield: [[660, 0, 0.08, "sine"], [990, 0.06, 0.2, "sine", 0.12]],
+  sting: [[196, 0, 0.18, "sawtooth", 0.1], [233, 0.16, 0.18, "sawtooth", 0.1], [392, 0.32, 0.5, "square", 0.08], [784, 0.34, 0.45, "triangle", 0.1]],
+  coins: [[1319, 0, 0.05, "triangle", 0.12], [1568, 0.06, 0.05, "triangle", 0.12], [2093, 0.12, 0.16, "triangle", 0.12]],
 };
 
 export function play(sound: Sound): void {

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { WordResult } from "@/lib/game/types";
+import { getCard } from "@/lib/game/cards";
+import { sabotageAwards, type SabotageAwards } from "@/lib/game/sabotage";
+import type { ResolvedHeist, WordResult } from "@/lib/game/types";
 import { useReducedMotion } from "@/lib/client/hooks";
 import { play } from "@/lib/client/sound";
 import type { PublicPlayer } from "@/lib/shared/api";
@@ -13,6 +15,8 @@ type Step =
   | { kind: "dup"; word: WordResult }
   | { kind: "unique"; word: WordResult }
   | { kind: "bonus" }
+  | { kind: "heist"; heist: ResolvedHeist }
+  | { kind: "cards" }
   | { kind: "summary" };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -28,6 +32,10 @@ function stepDuration(step: Step, dupCount: number, uniqueCount: number): number
       return clamp(10000 / uniqueCount, 150, 900);
     case "bonus":
       return 2200;
+    case "heist":
+      return 2600;
+    case "cards":
+      return 2400;
     case "summary":
       return Infinity;
   }
@@ -38,18 +46,24 @@ export function HostReveal({ view, act, busy }: HostControls) {
   const players = view.room.players;
   const reducedMotion = useReducedMotion();
 
+  const sab = result.sabotage;
+  const cardBonus = (id: string) => (sab?.players[id] ? sab.players[id].cashIn + sab.players[id].bounty : 0);
   const steps = useMemo<Step[]>(() => {
     const dups = result.words.filter((w) => w.cancelled);
     // Ascending by points so the biggest words land last.
     const uniques = result.words.filter((w) => !w.cancelled).sort((a, b) => a.points - b.points || a.word.localeCompare(b.word));
+    const anyCardBonus = Object.values(result.sabotage?.players ?? {}).some((s) => s.cashIn + s.bounty > 0);
     return [
       { kind: "intro" },
       ...dups.map((word): Step => ({ kind: "dup", word })),
       ...uniques.map((word): Step => ({ kind: "unique", word })),
       ...(result.longestBonus ? [{ kind: "bonus" } as Step] : []),
+      ...(result.sabotage?.heists ?? []).map((heist): Step => ({ kind: "heist", heist })),
+      ...(anyCardBonus ? [{ kind: "cards" } as Step] : []),
       { kind: "summary" },
     ];
   }, [result]);
+  const awards = sabotageAwards(sab);
   const dupCount = steps.filter((s) => s.kind === "dup").length;
   const uniqueCount = steps.filter((s) => s.kind === "unique").length;
 
@@ -63,6 +77,8 @@ export function HostReveal({ view, act, busy }: HostControls) {
     if (step.kind === "dup") play("cancel");
     if (step.kind === "unique") play("point");
     if (step.kind === "bonus") play("fanfare");
+    if (step.kind === "heist") play("coins");
+    if (step.kind === "cards") play("card");
     const t = setTimeout(() => setIndex((i) => i + 1), stepDuration(step, dupCount, uniqueCount));
     return () => clearTimeout(t);
   }, [step, dupCount, uniqueCount]);
@@ -74,12 +90,22 @@ export function HostReveal({ view, act, busy }: HostControls) {
   for (const s of revealed) {
     if (s.kind === "unique") for (const id of s.word.playerIds) running.set(id, (running.get(id) ?? 0) + s.word.points);
     if (s.kind === "bonus") for (const id of result.longestBonus!.playerIds) running.set(id, (running.get(id) ?? 0) + result.players[id].bonus);
+    if (s.kind === "heist") {
+      running.set(s.heist.sourceId, (running.get(s.heist.sourceId) ?? 0) + s.heist.points);
+      running.set(s.heist.targetId, (running.get(s.heist.targetId) ?? 0) - s.heist.points);
+    }
+    if (s.kind === "cards") for (const p of players) running.set(p.id, (running.get(p.id) ?? 0) + cardBonus(p.id));
   }
   if (step.kind === "summary") for (const p of players) running.set(p.id, p.score);
 
   const gaining = new Map<string, number>();
   if (step.kind === "unique") for (const id of step.word.playerIds) gaining.set(id, step.word.points);
   if (step.kind === "bonus") for (const id of result.longestBonus!.playerIds) gaining.set(id, result.players[id].bonus);
+  if (step.kind === "heist" && step.heist.points > 0) {
+    gaining.set(step.heist.sourceId, step.heist.points);
+    gaining.set(step.heist.targetId, -step.heist.points);
+  }
+  if (step.kind === "cards") for (const p of players) if (cardBonus(p.id) > 0) gaining.set(p.id, cardBonus(p.id));
 
   const byId = new Map(players.map((p) => [p.id, p]));
   const cancelledSoFar = revealed.filter((s): s is Step & { kind: "dup" } => s.kind === "dup").map((s) => s.word);
@@ -131,8 +157,40 @@ export function HostReveal({ view, act, busy }: HostControls) {
               <Finders ids={result.longestBonus.playerIds} byId={byId} />
             </div>
           )}
+          {step.kind === "heist" && (
+            <div key={`${step.heist.sourceId}-${step.heist.targetId}`} className="animate-pop-in text-center">
+              <p className="text-[1.6rem] font-black uppercase tracking-[0.3em] text-amber">💰 Heist</p>
+              <p className="my-[0.5rem] text-[4.5rem] font-black leading-none">
+                {step.heist.points > 0 ? `${step.heist.points} point${step.heist.points === 1 ? "" : "s"} stolen!` : "Came up empty!"}
+              </p>
+              <p className="flex flex-wrap items-center justify-center gap-[1rem] text-[1.8rem] font-bold">
+                <PlayerName p={byId.get(step.heist.sourceId)} /> robbed <PlayerName p={byId.get(step.heist.targetId)} />
+              </p>
+            </div>
+          )}
+          {step.kind === "cards" && (
+            <div className="animate-pop-in text-center">
+              <p className="text-[1.6rem] font-black uppercase tracking-[0.3em] text-sky">🃏 Card bonuses</p>
+              <ul className="mt-[1rem] flex flex-col gap-[0.5rem] text-[1.8rem] font-bold">
+                {players
+                  .filter((p) => cardBonus(p.id) > 0)
+                  .map((p) => (
+                    <li key={p.id} className="flex items-center justify-center gap-[0.8rem]">
+                      <PlayerName p={p} />
+                      <span className="text-amber">+{cardBonus(p.id)}</span>
+                      <span className="text-[1.3rem] text-ink-300">
+                        {[sab!.players[p.id].cashIn > 0 && `cash-in ${sab!.players[p.id].cashIn}`, sab!.players[p.id].bounty > 0 && `👑 bounty ${sab!.players[p.id].bounty}`]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
           {step.kind === "summary" && (
             <div className="w-full animate-fade-up">
+              <SabotageAwardsRow awards={awards} byId={byId} className="mb-[1.2rem]" />
               {result.longestBonus && (
                 <p className="mb-[1rem] text-[1.6rem]">
                   <span className="font-black text-amber">★ Longest:</span>{" "}
@@ -198,8 +256,9 @@ export function HostReveal({ view, act, busy }: HostControls) {
                 <span className="min-w-0 flex-1 truncate text-[1.7rem] font-black">{p.nickname}</span>
                 <span className="text-[2.2rem] font-black tabular-nums">{running.get(p.id) ?? 0}</span>
                 {gaining.has(p.id) && !reducedMotion && (
-                  <span key={index} className="absolute right-[1rem] -top-[0.5rem] animate-fly-up text-[2rem] font-black text-amber">
-                    +{gaining.get(p.id)}
+                  <span key={index} className={`absolute right-[1rem] -top-[0.5rem] animate-fly-up text-[2rem] font-black ${gaining.get(p.id)! < 0 ? "text-flame" : "text-amber"}`}>
+                    {gaining.get(p.id)! < 0 ? "−" : "+"}
+                    {Math.abs(gaining.get(p.id)!)}
                   </span>
                 )}
               </li>
@@ -207,6 +266,42 @@ export function HostReveal({ view, act, busy }: HostControls) {
         </ol>
       </aside>
     </div>
+  );
+}
+
+function PlayerName({ p }: { p: PublicPlayer | undefined }) {
+  if (!p) return <span>Someone</span>;
+  return (
+    <span className="flex items-center gap-[0.5rem]">
+      <Avatar emoji={p.emoji} color={p.color} size="sm" /> {p.nickname}
+    </span>
+  );
+}
+
+/** "Most Evil", "Most Sabotaged" (with sympathy) and "Best Reflect". Shared with the final screen. */
+export function SabotageAwardsRow({ awards, byId, className = "" }: { awards: SabotageAwards; byId: Map<string, PublicPlayer>; className?: string }) {
+  const names = (ids: string[]) => ids.map((id) => byId.get(id)?.nickname ?? "?").join(" & ");
+  const items: { emoji: string; title: string; body: string }[] = [];
+  if (awards.mostEvil) items.push({ emoji: "😈", title: "Most Evil", body: `${names(awards.mostEvil.playerIds)} · ${awards.mostEvil.count} card${awards.mostEvil.count === 1 ? "" : "s"} played` });
+  if (awards.mostSabotaged) {
+    items.push({ emoji: "🫂", title: "Most Sabotaged", body: `${names(awards.mostSabotaged.playerIds)} · hit ${awards.mostSabotaged.count}× (we're so sorry)` });
+  }
+  if (awards.bestReflect) {
+    const card = getCard(awards.bestReflect.cardId);
+    items.push({ emoji: "🛡️", title: "Best Reflect", body: `${names([awards.bestReflect.playerId])} bounced ${card?.name ?? "a card"} back at ${names([awards.bestReflect.attackerId])}` });
+  }
+  if (items.length === 0) return null;
+  return (
+    <ul className={`grid grid-cols-3 gap-[0.8rem] ${className}`} aria-label="Sabotage awards">
+      {items.map((it) => (
+        <li key={it.title} className="rounded-[1rem] bg-ink-800 px-[1rem] py-[0.7rem]">
+          <p className="text-[1.3rem] font-black">
+            <span aria-hidden>{it.emoji}</span> {it.title}
+          </p>
+          <p className="text-[1.2rem] leading-snug text-ink-300">{it.body}</p>
+        </li>
+      ))}
+    </ul>
   );
 }
 

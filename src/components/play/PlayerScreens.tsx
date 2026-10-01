@@ -5,6 +5,7 @@ import { MIN_PLAYERS } from "@/lib/game/constants";
 import { scoreWord } from "@/lib/game/scoring";
 import type { Auth, PlayerView, RoomAction } from "@/lib/shared/api";
 import { ApiClientError, api } from "@/lib/client/api";
+import { useCalmSetting } from "@/lib/client/calm";
 import { useServerNow } from "@/lib/client/hooks";
 import { Avatar, Button, Panel } from "../ui";
 
@@ -64,6 +65,28 @@ function Me({ view }: { view: PlayerView }) {
   );
 }
 
+function CalmToggle() {
+  const [calm, setCalm] = useCalmSetting();
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm font-bold text-ink-300">
+      <span>
+        Reduce chaos effects
+        <span className="block text-xs font-normal">Swaps spinning, wobbling and shuffling for a static label.</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-label="Reduce chaos effects"
+        aria-checked={calm}
+        onClick={() => setCalm(!calm)}
+        className={`min-w-[4rem] rounded-full px-3 py-1 font-black outline-none focus-visible:ring-4 focus-visible:ring-sky ${calm ? "bg-sky text-ink-950" : "bg-ink-700 text-white"}`}
+      >
+        {calm ? "On" : "Off"}
+      </button>
+    </div>
+  );
+}
+
 export function PlayerLobby({ view, auth, onView, onLeave }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void; onLeave: () => void }) {
   const { settings, players } = view.room;
   return (
@@ -78,7 +101,15 @@ export function PlayerLobby({ view, auth, onView, onLeave }: { view: PlayerView;
         <p className="mt-4 text-sm text-ink-300">
           {settings.rounds} rounds · {settings.roundSeconds}s each · {players.length} player{players.length === 1 ? "" : "s"}
         </p>
+        <p className="mt-1 text-sm text-ink-300">
+          {settings.sabotageEnabled ? `🃏 Sabotage cards on: ${settings.cardMinLength}+ letter words earn cards` : "Sabotage cards off"}
+        </p>
       </Panel>
+      {settings.sabotageEnabled && (
+        <Panel className="!p-4">
+          <CalmToggle />
+        </Panel>
+      )}
       <VipControls view={view} auth={auth} onView={onView} />
       <Button variant="ghost" className="mt-auto" onClick={onLeave}>
         Leave room
@@ -125,18 +156,45 @@ function WordChip({ word, cancelled }: { word: string; cancelled?: boolean }) {
 export function PlayerReveal({ view, auth, onView }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void }) {
   const result = view.room.lastResult;
   const mine = result?.players[view.me.id];
+  const sab = result?.sabotage;
+  const cards = sab?.players[view.me.id];
+  const name = (id: string) => view.room.players.find((p) => p.id === id)?.nickname ?? "Someone";
+  const robbedBy = (sab?.heists ?? []).filter((h) => h.targetId === view.me.id && h.points > 0);
+  const robbed = (sab?.heists ?? []).filter((h) => h.sourceId === view.me.id);
   return (
     <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-4 px-5 py-6">
       <p className="text-center text-sm font-bold uppercase tracking-widest text-ink-300">
         Round {result?.round} of {view.room.settings.rounds}
       </p>
+      {robbedBy.map((h) => (
+        <Panel key={`robbed-${h.sourceId}`} className="animate-pop-in bg-flame/20 text-center ring-2 ring-flame">
+          <p className="text-5xl" aria-hidden>
+            💰😱
+          </p>
+          <p className="mt-1 text-2xl font-black">You got robbed!</p>
+          <p className="text-ink-300">
+            {name(h.sourceId)} stole <span className="font-black text-flame">{h.points}</span> of your points.
+          </p>
+        </Panel>
+      ))}
       {mine ? (
         <Panel className="text-center">
-          <p className="text-6xl font-black text-amber">+{mine.total}</p>
+          <p className="text-6xl font-black text-amber">
+            {mine.total >= 0 ? "+" : ""}
+            {mine.total}
+          </p>
           <p className="mt-1 text-ink-300">
             {mine.uniqueWords.length} unique · {mine.cancelledWords.length} cancelled
             {mine.bonus > 0 && <span className="font-bold text-amber"> · longest word +{mine.bonus}!</span>}
           </p>
+          {cards && (cards.cashIn > 0 || cards.bounty > 0 || cards.heist !== 0) && (
+            <p className="mt-1 text-sm font-bold text-ink-300">
+              Cards:{cards.cashIn > 0 && ` 🃏 cash-in +${cards.cashIn}`}
+              {cards.bounty > 0 && ` · 👑 bounty +${cards.bounty}`}
+              {robbed.map((h) => ` · 💰 robbed ${name(h.targetId)} +${h.points}`)}
+              {robbedBy.map((h) => ` · 💰 stolen −${h.points}`)}
+            </p>
+          )}
           <p className="mt-2 text-lg font-bold">Total: {view.me.score}</p>
         </Panel>
       ) : (
@@ -185,6 +243,12 @@ export function PlayerFinal({ view, auth, onView }: { view: PlayerView; auth: Au
           <Stat label="Unique words" value={stats.uniqueWords} />
           <Stat label="Longest" value={stats.longestWord?.toUpperCase() ?? "—"} />
           <Stat label="Best word" value={stats.bestWord ? `${stats.bestWord.word.toUpperCase()} (${stats.bestWord.points})` : "—"} />
+          {view.room.settings.sabotageEnabled && (
+            <>
+              <Stat label="Cards played" value={stats.cardsPlayed} />
+              <Stat label="Times sabotaged" value={stats.hitsTaken} />
+            </>
+          )}
         </Panel>
       )}
       <VipControls view={view} auth={auth} onView={onView} />

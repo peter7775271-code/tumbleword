@@ -46,7 +46,7 @@ export function scoreRound({ round, board, solution, submissions, playerIds }: S
 
   const players: Record<string, PlayerRoundResult> = {};
   for (const id of playerIds) {
-    players[id] = { playerId: id, words: [], uniqueWords: [], cancelledWords: [], wordPoints: 0, bonus: 0, total: 0 };
+    players[id] = { playerId: id, words: [], uniqueWords: [], cancelledWords: [], wordPoints: 0, bonus: 0, cardPoints: 0, total: 0 };
   }
   for (const w of words) {
     for (const id of w.playerIds) {
@@ -69,7 +69,7 @@ export function scoreRound({ round, board, solution, submissions, playerIds }: S
     longestBonus = { length, playerIds: ids, words: top.map((w) => w.word) };
     for (const id of ids) players[id].bonus = LONGEST_WORD_BONUS;
   }
-  for (const p of Object.values(players)) p.total = p.wordPoints + p.bonus;
+  for (const p of Object.values(players)) p.total = p.wordPoints + p.bonus + p.cardPoints;
 
   return {
     round,

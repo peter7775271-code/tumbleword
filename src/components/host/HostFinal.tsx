@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import { Avatar } from "../ui";
 import type { HostControls } from "./HostApp";
+import { SabotageAwardsRow } from "./HostReveal";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export function HostFinal({ view, act, busy, newRoom }: HostControls) {
   const stats = view.room.final ?? [];
   const byId = new Map(view.room.players.map((p) => [p.id, p]));
+  const sabotage = !!view.room.finalAwards && stats.some((s) => s.cardsPlayed > 0 || s.hitsTaken > 0);
   const againRef = useRef<HTMLButtonElement>(null);
   useEffect(() => againRef.current?.focus(), []);
 
@@ -37,6 +39,12 @@ export function HostFinal({ view, act, busy, newRoom }: HostControls) {
             <th className="px-[1rem] text-right">Unique</th>
             <th className="px-[1rem]">Longest</th>
             <th className="px-[1rem]">Best word</th>
+            {sabotage && (
+              <>
+                <th className="px-[1rem] text-right">😈 Played</th>
+                <th className="px-[1rem] text-right">🎯 Hit</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -55,7 +63,7 @@ export function HostFinal({ view, act, busy, newRoom }: HostControls) {
                 <td className="px-[1rem] text-right tabular-nums">{s.wordsFound}</td>
                 <td className="px-[1rem] text-right tabular-nums text-sky">{s.uniqueWords}</td>
                 <td className="px-[1rem] font-bold uppercase">{s.longestWord ?? "—"}</td>
-                <td className="rounded-r-[1rem] px-[1rem] font-bold uppercase">
+                <td className={`px-[1rem] font-bold uppercase ${sabotage ? "" : "rounded-r-[1rem]"}`}>
                   {s.bestWord ? (
                     <>
                       {s.bestWord.word} <span className="text-amber">+{s.bestWord.points}</span>
@@ -64,11 +72,19 @@ export function HostFinal({ view, act, busy, newRoom }: HostControls) {
                     "—"
                   )}
                 </td>
+                {sabotage && (
+                  <>
+                    <td className="px-[1rem] text-right tabular-nums">{s.cardsPlayed}</td>
+                    <td className="rounded-r-[1rem] px-[1rem] text-right tabular-nums">{s.hitsTaken}</td>
+                  </>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      {view.room.finalAwards && <SabotageAwardsRow awards={view.room.finalAwards} byId={byId} />}
 
       <div className="mt-auto flex gap-[1.5rem]">
         <button ref={againRef} type="button" disabled={busy} onClick={() => void act({ type: "playAgain" })} className={`${btn} flex-[2] bg-amber text-ink-950 shadow-[0_0.3rem_0_#b37b00]`}>

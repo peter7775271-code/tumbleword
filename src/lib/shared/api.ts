@@ -1,5 +1,5 @@
-import type { CardDefinition } from "@/lib/game/cards";
-import type { ActiveEffect, Board, Phase, PlayerFinalStats, PlayerStatus, RoundResult, Settings } from "@/lib/game/types";
+import type { SabotageAwards } from "@/lib/game/sabotage";
+import type { ActiveEffect, Board, Phase, PlayerFinalStats, PlayerStatus, RoundResult, SabotageEvent, Settings } from "@/lib/game/types";
 
 export type Auth = { role: "host"; token: string } | { role: "player"; playerId: string; token: string };
 
@@ -10,6 +10,7 @@ export interface PublicPlayer {
   emoji: string;
   status: PlayerStatus;
   score: number;
+  /** How many sabotage cards they hold (the cards themselves are private). */
   cardCount: number;
   connected: boolean;
 }
@@ -30,12 +31,17 @@ export interface PublicRoom {
   hostConnected: boolean;
   vipId: string | null;
   round: PublicRound | null;
-  activeEffects: ActiveEffectView[];
+  /** Unexpired sabotage effects on anyone (icons, shield bubbles, bounty crown). */
+  activeEffects: ActiveEffect[];
+  /** Recent sabotage plays this round, oldest first. */
+  events: SabotageEvent[];
   /** Words found so far this round, per player (counts only). */
   progress: Record<string, number>;
   /** The latest scored round (REVEAL and FINAL). */
   lastResult: RoundResult | null;
   final: PlayerFinalStats[] | null;
+  /** FINAL only: whole-game sabotage awards. */
+  finalAwards: SabotageAwards | null;
   version: number;
   serverNow: number;
 }
@@ -45,16 +51,25 @@ export interface HostView {
   room: PublicRoom;
 }
 
-export interface ActiveEffectView extends ActiveEffect {
-  card: CardDefinition | null;
+/** Private sabotage state, only ever sent to its owner. */
+export interface MySabotage {
+  /** Card ids in hand. */
+  hand: string[];
+  /** This player's submissions are rejected after this (round end minus stolen time). */
+  deadline: number | null;
+  clockStolenMs: number;
+  immuneUntil: number;
+  /** Earliest time the next card can be played (rate limit). */
+  nextPlayAt: number;
+  /** Earliest time a word can earn another card. */
+  nextEarnAt: number;
 }
 
 export interface PlayerView {
   kind: "player";
   room: PublicRoom;
   me: PublicPlayer & { isVip: boolean };
-  hand: CardDefinition[];
-  activeEffects: ActiveEffectView[];
+  sabotage: MySabotage;
   /** This player's accepted words for the current round. */
   myWords: string[];
   hintsLeft: number;
@@ -109,6 +124,10 @@ export interface SubmitResponse {
   /** Points if the word stays unique (accepted only). */
   points: number;
   count: number;
+  /** Sabotage reward for this word, if any. */
+  reward?: { kind: "card"; cardId: string } | { kind: "cashIn"; points: number };
+  /** True when an active Bounty paid +1 for this word. */
+  bounty?: boolean;
 }
 
 export interface Hint {

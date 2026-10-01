@@ -16,21 +16,23 @@ function Stepper({
   display,
   onChange,
   limits,
+  disabled = false,
 }: {
   label: string;
   value: number;
   display: string;
   onChange: (v: number) => void;
   limits: { min: number; max: number; step: number };
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-[1rem]">
+    <div className={`flex items-center justify-between gap-[1rem] ${disabled ? "opacity-50" : ""}`}>
       <span className="text-[1.3rem] font-bold text-ink-300">{label}</span>
       <div className="flex items-center gap-[0.6rem]">
         <button
           type="button"
           aria-label={`Decrease ${label}`}
-          disabled={value <= limits.min}
+          disabled={disabled || value <= limits.min}
           onClick={() => onChange(value - limits.step)}
           className={`${tvButton} h-[2.6rem] w-[2.6rem] bg-ink-700 text-[1.5rem]`}
         >
@@ -42,13 +44,31 @@ function Stepper({
         <button
           type="button"
           aria-label={`Increase ${label}`}
-          disabled={value >= limits.max}
+          disabled={disabled || value >= limits.max}
           onClick={() => onChange(value + limits.step)}
           className={`${tvButton} h-[2.6rem] w-[2.6rem] bg-ink-700 text-[1.5rem]`}
         >
           +
         </button>
       </div>
+    </div>
+  );
+}
+
+function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-[1rem]">
+      <span className="text-[1.3rem] font-bold text-ink-300">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        aria-label={label}
+        onClick={() => onChange(!value)}
+        className={`${tvButton} min-w-[6rem] px-[1rem] py-[0.4rem] text-[1.4rem] ${value ? "bg-sky text-ink-950" : "bg-ink-700"}`}
+      >
+        {value ? "On" : "Off"}
+      </button>
     </div>
   );
 }
@@ -129,19 +149,16 @@ export function HostLobby({ view, connected, act, busy, error, joinUrl }: HostCo
           <Stepper label="Rounds" value={settings.rounds} display={String(settings.rounds)} limits={SETTING_LIMITS.rounds} onChange={(rounds) => setSetting({ rounds })} />
           <Stepper label="Round length" value={settings.roundSeconds} display={`${settings.roundSeconds}s`} limits={SETTING_LIMITS.roundSeconds} onChange={(roundSeconds) => setSetting({ roundSeconds })} />
           <Stepper label="Min words / board" value={settings.minWords} display={String(settings.minWords)} limits={SETTING_LIMITS.minWords} onChange={(minWords) => setSetting({ minWords })} />
-          <div className="flex items-center justify-between gap-[1rem]">
-            <span className="text-[1.3rem] font-bold text-ink-300">Hints</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.hints}
-              aria-label="Hints"
-              onClick={() => setSetting({ hints: !settings.hints })}
-              className={`${tvButton} min-w-[6rem] px-[1rem] py-[0.4rem] text-[1.4rem] ${settings.hints ? "bg-sky text-ink-950" : "bg-ink-700"}`}
-            >
-              {settings.hints ? "On" : "Off"}
-            </button>
-          </div>
+          <Toggle label="Hints" value={settings.hints} onChange={(hints) => setSetting({ hints })} />
+          <Toggle label="🃏 Sabotage cards" value={settings.sabotageEnabled} onChange={(sabotageEnabled) => setSetting({ sabotageEnabled })} />
+          <Stepper
+            label="Card word length"
+            value={settings.cardMinLength}
+            display={`${settings.cardMinLength}+`}
+            limits={SETTING_LIMITS.cardMinLength}
+            disabled={!settings.sabotageEnabled}
+            onChange={(cardMinLength) => setSetting({ cardMinLength })}
+          />
         </div>
 
         <div className="flex items-center gap-[1.5rem]">

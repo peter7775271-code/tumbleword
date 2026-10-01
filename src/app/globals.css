@@ -23,6 +23,12 @@
   --animate-shake: shake 320ms ease-in-out;
   --animate-pulse-soft: pulse-soft 1.4s ease-in-out infinite;
   --animate-count: count 1s ease-out both;
+  --animate-card-pop: card-pop 1.8s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  --animate-card-play: card-play 450ms ease-in both;
+  --animate-banner: banner 2s ease-out both;
+  --animate-bubble: bubble 2.2s ease-in-out infinite;
+  --animate-flash: flash 1.4s ease-out both;
+  --animate-vortex: vortex 2.2s linear infinite;
 
   @keyframes pop-in {
     from { transform: scale(0.4); opacity: 0; }
@@ -50,12 +56,54 @@
     from { transform: scale(1.8); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
   }
-  @keyframes wiggle {
-    0%, 100% { transform: rotate(0deg) translateX(0); }
-    25% { transform: rotate(-2deg) translateX(-2px); }
-    50% { transform: rotate(2deg) translateX(2px); }
-    75% { transform: rotate(-1.5deg) translateX(-1px); }
+  @keyframes card-pop {
+    0% { transform: translateY(1em) scale(0.5); opacity: 0; }
+    12% { transform: translateY(0) scale(1.08); opacity: 1; }
+    20% { transform: scale(1); }
+    80% { opacity: 1; }
+    100% { transform: translateY(-0.6em); opacity: 0; }
   }
+  @keyframes card-play {
+    0% { transform: translateY(0) scale(1); opacity: 1; }
+    100% { transform: translateY(-6em) scale(0.6) rotate(-12deg); opacity: 0; }
+  }
+  @keyframes banner {
+    0% { transform: scale(0.6); opacity: 0; }
+    12% { transform: scale(1.05); opacity: 1; }
+    20% { transform: scale(1); }
+    85% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes bubble {
+    0%, 100% { transform: scale(1); opacity: 0.85; }
+    50% { transform: scale(1.08); opacity: 1; }
+  }
+  @keyframes flash {
+    0% { transform: scale(1.4); opacity: 0; }
+    15% { transform: scale(1); opacity: 1; }
+    75% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes vortex {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+}
+
+/* Sabotage effects (player board). Keyframes outside @theme so they can be referenced inline. */
+@keyframes jelly {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1, 1); }
+  20% { transform: translate(6%, -4%) rotate(-5deg) scale(1.06, 0.94); }
+  45% { transform: translate(-5%, 5%) rotate(4deg) scale(0.95, 1.05); }
+  70% { transform: translate(4%, 3%) rotate(-3deg) scale(1.04, 0.97); }
+}
+@keyframes board-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes roulette-land {
+  from { transform: translateY(0); }
+  to { transform: translateY(var(--roulette-end)); }
 }
 
 html {

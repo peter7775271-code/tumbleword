@@ -12,6 +12,7 @@ import {
   SETTING_LIMITS,
 } from "./constants";
 import type { GeneratedBoard } from "./generator";
+import { clearSabotage, freshSabotage, resolveRoundSabotage } from "./sabotage";
 import { scoreRound } from "./scoring";
 import type { Phase, Room, ServerPlayer, Settings, Submission } from "./types";
 
@@ -57,35 +58,44 @@ export function createRoom(code: string, hostToken: string, now: number): Room {
     eventLog: [],
     activeEffects: [],
     pendingHeists: [],
+    sabotageSeq: 0,
     createdAt: now,
   };
 }
 
-export function normalizeRoom(room: Partial<Room> & Pick<Room, "players" | "code" | "phase" | "settings">): Room {
-  const settings = { ...DEFAULT_SETTINGS, ...(room.settings ?? {}) };
-  const players = (room.players ?? []).map((player) => ({
-    ...player,
-    hand: Array.isArray(player.hand) ? player.hand : [],
-    lastCardEarnedAt: Number.isFinite(player.lastCardEarnedAt) ? player.lastCardEarnedAt : 0,
-    lastCardPlayedAt: Number.isFinite(player.lastCardPlayedAt) ? player.lastCardPlayedAt : 0,
-    personalDeadlineOffset: Number.isFinite(player.personalDeadlineOffset) ? player.personalDeadlineOffset : 0,
-    lastHitAt: Number.isFinite(player.lastHitAt) ? player.lastHitAt : 0,
-  }));
+const LEGACY_PLAYER_KEYS = ["hand", "lastCardEarnedAt", "lastCardPlayedAt", "personalDeadlineOffset", "lastHitAt"];
 
+/**
+ * Fills in fields added after a room was stored (rooms live for up to 30 minutes across deploys).
+ * Returns the same object when nothing needed fixing, so callers can cheaply detect upgrades.
+ */
+export function normalizeRoom(room: Room): Room {
+  const settingsComplete = Object.keys(DEFAULT_SETTINGS).every((k) => k in (room.settings ?? {}));
+  const playersComplete = room.players.every((p) => p.sabotage && Array.isArray(p.sabotage.hand) && "cashIn" in p.sabotage);
+  const eventsComplete = Array.isArray(room.eventLog) && room.eventLog.every((e) => typeof e === "object" && e !== null);
+  if (
+    settingsComplete &&
+    playersComplete &&
+    eventsComplete &&
+    Array.isArray(room.activeEffects) &&
+    Array.isArray(room.pendingHeists) &&
+    typeof room.sabotageSeq === "number"
+  ) {
+    return room;
+  }
   return {
-    code: room.code,
-    phase: room.phase ?? "LOBBY",
-    settings,
-    players,
-    kickedIds: Array.isArray(room.kickedIds) ? room.kickedIds : [],
-    hostToken: room.hostToken ?? "",
-    hostLastSeenAt: Number.isFinite(room.hostLastSeenAt) ? room.hostLastSeenAt! : 0,
-    round: room.round ?? null,
-    history: Array.isArray(room.history) ? room.history : [],
-    eventLog: Array.isArray(room.eventLog) ? room.eventLog : [],
+    ...room,
+    settings: { ...DEFAULT_SETTINGS, ...(room.settings ?? {}) },
+    players: room.players.map((p) => {
+      const copy: Record<string, unknown> = { ...p, sabotage: { ...freshSabotage(), ...(p.sabotage ?? {}) } };
+      // Older rooms stored a few sabotage fields flat on the player; they're per-round so dropping them is safe.
+      for (const key of LEGACY_PLAYER_KEYS) delete copy[key];
+      return copy as unknown as ServerPlayer;
+    }),
+    eventLog: eventsComplete ? room.eventLog : [],
     activeEffects: Array.isArray(room.activeEffects) ? room.activeEffects : [],
     pendingHeists: Array.isArray(room.pendingHeists) ? room.pendingHeists : [],
-    createdAt: Number.isFinite(room.createdAt) ? room.createdAt! : Date.now(),
+    sabotageSeq: typeof room.sabotageSeq === "number" ? room.sabotageSeq : 0,
   };
 }
 
@@ -161,11 +171,7 @@ export function addPlayer(room: Room, input: JoinInput, now: number): JoinResult
     lastSeenAt: now,
     status: room.phase === "LOBBY" ? "active" : "spectating",
     score: 0,
-    hand: [],
-    lastCardEarnedAt: 0,
-    lastCardPlayedAt: 0,
-    personalDeadlineOffset: 0,
-    lastHitAt: 0,
+    sabotage: freshSabotage(),
   };
   room.players.push(player);
   return { player, reclaimed: false };
@@ -191,7 +197,7 @@ export function updateSettings(room: Room, patch: Partial<Settings>): void {
   if (typeof patch.minWords === "number") s.minWords = clamp(patch.minWords, SETTING_LIMITS.minWords);
   if (typeof patch.hints === "boolean") s.hints = patch.hints;
   if (typeof patch.sabotageEnabled === "boolean") s.sabotageEnabled = patch.sabotageEnabled;
-  if (typeof patch.cardMinLength === "number") s.cardMinLength = clamp(patch.cardMinLength, { min: 3, max: 8, step: 1 });
+  if (typeof patch.cardMinLength === "number") s.cardMinLength = clamp(patch.cardMinLength, SETTING_LIMITS.cardMinLength);
 }
 
 // ---------- rounds ----------
@@ -208,6 +214,7 @@ function beginCountdown(room: Room, number: number, gen: GeneratedBoard, now: nu
     hintsUsed: {},
   };
   for (const p of room.players) p.status = "active";
+  clearSabotage(room);
 }
 
 export function startGame(room: Room, gen: GeneratedBoard, now: number): void {
@@ -216,17 +223,7 @@ export function startGame(room: Room, gen: GeneratedBoard, now: number): void {
     throw new GameError("not_enough_players", `Need at least ${MIN_PLAYERS} players`);
   }
   room.history = [];
-  room.activeEffects = [];
-  room.pendingHeists = [];
-  room.eventLog = [];
-  for (const p of room.players) {
-    p.score = 0;
-    p.hand = [];
-    p.lastCardEarnedAt = 0;
-    p.lastCardPlayedAt = 0;
-    p.personalDeadlineOffset = 0;
-    p.lastHitAt = 0;
-  }
+  for (const p of room.players) p.score = 0;
   beginCountdown(room, 1, gen, now);
 }
 
@@ -250,17 +247,10 @@ export function playAgain(room: Room): void {
   room.phase = "LOBBY";
   room.round = null;
   room.history = [];
-  room.activeEffects = [];
-  room.pendingHeists = [];
-  room.eventLog = [];
+  clearSabotage(room);
   for (const p of room.players) {
     p.score = 0;
     p.status = "active";
-    p.hand = [];
-    p.lastCardEarnedAt = 0;
-    p.lastCardPlayedAt = 0;
-    p.personalDeadlineOffset = 0;
-    p.lastHitAt = 0;
   }
 }
 
@@ -289,19 +279,11 @@ export function finishRound(room: Room, submissions: Submission[]): void {
     submissions,
     playerIds: active.map((p) => p.id),
   });
+  resolveRoundSabotage(room, result);
   for (const p of active) p.score += result.players[p.id].total;
   room.history.push(result);
   room.phase = "REVEAL";
-  room.activeEffects = [];
-  room.pendingHeists = [];
-  room.eventLog = [];
-  for (const p of room.players) {
-    p.hand = [];
-    p.lastCardEarnedAt = 0;
-    p.lastCardPlayedAt = 0;
-    p.personalDeadlineOffset = 0;
-    p.lastHitAt = 0;
-  }
+  clearSabotage(room);
 }
 
 /** Effective phase at `now` (a COUNTDOWN whose start time passed is really a ROUND). */
