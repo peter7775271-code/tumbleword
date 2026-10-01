@@ -32,10 +32,6 @@ export const CARD_RULES = {
   /** No cards in the opening and closing seconds of a round. */
   lockoutStartMs: 10_000,
   lockoutEndMs: 8_000,
-  maxHitsPerRound: 3,
-  /** From this many hits on, new effect durations are scaled down. */
-  reducedAfterHits: 2,
-  reducedDurationFactor: 0.6,
   hitImmunityMs: 3_000,
   cleanseImmunityMs: 5_000,
   clockThiefMs: 5_000,

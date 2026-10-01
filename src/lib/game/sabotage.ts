@@ -21,7 +21,7 @@ import type {
  */
 
 export function freshSabotage(): PlayerSabotage {
-  return { hand: [], nextCardAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, hitsTaken: 0, bountyBonus: 0 };
+  return { hand: [], nextCardAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, bountyBonus: 0 };
 }
 
 /** Drops every hand, effect and pending card so nothing leaks into the next round. */
@@ -171,7 +171,6 @@ export type PlayFailure =
   | "self_target"
   | "target_offline"
   | "is_leader"
-  | "target_capped"
   | "target_immune"
   | "already_active"
   | "clock_capped"
@@ -223,7 +222,6 @@ function scramblePermutation(size: number, rng: Rng): number[] {
 function landingProblem(room: Room, card: CardDefinition, target: ServerPlayer, now: number, ignoreImmunity: boolean): { reason: PlayFailure; message: string } | null {
   const s = target.sabotage;
   const name = target.nickname;
-  if (s.hitsTaken >= R.maxHitsPerRound) return { reason: "target_capped", message: `${name} has taken enough sabotage this round` };
   if (!ignoreImmunity && !card.ignoresImmunity && now < s.immuneUntil) {
     return { reason: "target_immune", message: `${name} is immune for ${Math.ceil((s.immuneUntil - now) / 1000)}s` };
   }
@@ -246,8 +244,6 @@ function landingProblem(room: Room, card: CardDefinition, target: ServerPlayer, 
 /** Applies a harmful card to one target. Assumes `landingProblem` returned null. */
 function land(room: Room, round: Round, card: CardDefinition, sourceId: string, target: ServerPlayer, now: number, rng: Rng, extra: Partial<ActiveEffect> = {}): void {
   const s = target.sabotage;
-  const factor = s.hitsTaken >= R.reducedAfterHits ? R.reducedDurationFactor : 1;
-  s.hitsTaken += 1;
   s.immuneUntil = Math.max(s.immuneUntil, now + R.hitImmunityMs);
 
   if (card.effectType === "clock") {
@@ -266,7 +262,7 @@ function land(room: Room, round: Round, card: CardDefinition, sourceId: string, 
   if (card.effectType === "black-hole") tiles = pickTiles(size, R.blackHoleTiles, rng);
   if (card.effectType === "scramble") tiles = scramblePermutation(size, rng);
 
-  const duration = card.effectType === "bounty" ? round.endsAt - now : Math.round((extra.viaCardId ? (getCard(extra.viaCardId)?.durationMs ?? card.durationMs) : card.durationMs) * factor);
+  const duration = card.effectType === "bounty" ? round.endsAt - now : extra.viaCardId ? (getCard(extra.viaCardId)?.durationMs ?? card.durationMs) : card.durationMs;
   room.activeEffects.push({
     id: nextId(room, "fx-"),
     cardId: card.id,
@@ -327,7 +323,6 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId:
     const assigned: Record<string, string> = {};
     for (const target of room.players.filter(eligible)) {
       if (card.effectType === "chaos") {
-        if (target.sabotage.hitsTaken >= R.maxHitsPerRound) continue;
         const options = CHAOS_POOL.filter((c) => !hasActive(room, target.id, c.effectType, now));
         const pick = options[Math.floor(rng() * options.length)];
         if (!pick) continue;

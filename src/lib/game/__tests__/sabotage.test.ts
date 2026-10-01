@@ -166,20 +166,17 @@ describe("playing cards", () => {
     expect(play(room, "p0", "padlock", "p2", OPEN)).toMatchObject({ ok: false, reason: "no_target" });
   });
 
-  it("caps hits per target and shortens durations after two", () => {
+  it("has no limit on how often one player can be hit, and never shortens effects", () => {
     const room = liveRoom(4);
     let t = OPEN;
-    const cards = ["fog-machine", "padlock", "tiny-print", "jelly-board"];
-    const attackers = ["p2", "p3", "p2"];
-    for (let i = 0; i < 3; i++) {
-      expect(play(room, attackers[i], cards[i], "p1", t).ok).toBe(true);
+    const cards = ["fog-machine", "padlock", "tiny-print", "jelly-board", "mirror-mirror", "spin-cycle"];
+    const attackers = ["p0", "p2", "p3"];
+    cards.forEach((card, i) => {
+      expect(play(room, attackers[i % 3], card, "p1", t).ok).toBe(true);
       t += CARD_RULES.hitImmunityMs;
-    }
-    const third = room.activeEffects.find((e) => e.cardId === "tiny-print")!;
-    expect(third.expiresAt - third.startedAt).toBe(8_000 * CARD_RULES.reducedDurationFactor);
-    const capped = play(room, "p0", cards[3], "p1", t);
-    expect(capped).toMatchObject({ ok: false, reason: "target_capped" });
-    expect(player(room, "p0").sabotage.hand).toEqual(["jelly-board"]);
+    });
+    const last = room.activeEffects.find((e) => e.cardId === "spin-cycle")!;
+    expect(last.expiresAt - last.startedAt).toBe(getCard("spin-cycle")!.durationMs);
   });
 
   it("gives 3s of immunity after a hit, which Black Hole and Chaos Shuffle ignore", () => {
@@ -252,10 +249,8 @@ describe("clock thief", () => {
     expect(p1.sabotage.personalDeadlineOffset).toBe(5_000);
     expect(player(room, "p0").sabotage.personalDeadlineOffset).toBe(0);
     p1.sabotage.personalDeadlineOffset = 12_000;
-    p1.sabotage.hitsTaken = 0;
     play(room, "p2", "clock-thief", "p1", OPEN + 5_000);
     expect(p1.sabotage.personalDeadlineOffset).toBe(15_000);
-    p1.sabotage.hitsTaken = 0;
     expect(play(room, "p0", "clock-thief", "p1", OPEN + 10_000)).toMatchObject({ ok: false, reason: "clock_capped" });
   });
 
@@ -378,7 +373,7 @@ describe("round boundaries and stats", () => {
     expect(room.activeEffects).toEqual([]);
     expect(room.pendingHeists).toEqual([]);
     expect(room.eventLog).toEqual([]);
-    expect(room.players.every((p) => p.sabotage.hand.length === 0 && p.sabotage.hitsTaken === 0)).toBe(true);
+    expect(room.players.every((p) => p.sabotage.hand.length === 0 && p.sabotage.immuneUntil === 0)).toBe(true);
   });
 
   it("records Most Evil, Most Sabotaged and Best Reflect", () => {

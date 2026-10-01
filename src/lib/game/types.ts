@@ -44,8 +44,6 @@ export interface PlayerSabotage {
   personalDeadlineOffset: number;
   /** New effects bounce off until this time (hit immunity, Cleanse). */
   immuneUntil: number;
-  /** Sabotages received this round (for the per-target cap). */
-  hitsTaken: number;
   /** Points earned from an active Bounty. */
   bountyBonus: number;
 }
