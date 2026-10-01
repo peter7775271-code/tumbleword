@@ -1,6 +1,6 @@
 import { CARD_RULES } from "@/lib/game/cards";
 import { HINTS_PER_ROUND, MISSED_WORDS_SHOWN } from "@/lib/game/constants";
-import { aggregateSabotage, personalDeadline, sabotageAwards } from "@/lib/game/sabotage";
+import { aggregateSabotage, nextDealAt, personalDeadline, sabotageAwards } from "@/lib/game/sabotage";
 import { effectivePhase, isHostConnected, isPlayerConnected, vipId } from "@/lib/game/state-machine";
 import { finalStats } from "@/lib/game/stats";
 import type { Room, ServerPlayer } from "@/lib/game/types";
@@ -82,7 +82,7 @@ export function playerView(room: Room, publicRoom: PublicRoom, player: ServerPla
       clockStolenMs: s.personalDeadlineOffset,
       immuneUntil: s.immuneUntil,
       nextPlayAt: s.lastCardPlayedAt > 0 ? s.lastCardPlayedAt + CARD_RULES.playCooldownMs : 0,
-      nextEarnAt: s.lastCardEarnedAt > 0 ? s.lastCardEarnedAt + CARD_RULES.earnCooldownMs : 0,
+      nextCardAt: nextDealAt(room, player),
     },
     myWords,
     hintsLeft: room.settings.hints ? Math.max(0, HINTS_PER_ROUND - (room.round?.hintsUsed[player.id] ?? 0)) : 0,

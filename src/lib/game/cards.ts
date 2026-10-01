@@ -28,11 +28,7 @@ export interface CardDefinition {
 }
 
 export const CARD_RULES = {
-  /** Words shorter than this never award cards, whatever the host setting says. */
-  absoluteMinWordLength: 4,
-  earnCooldownMs: 6_000,
   maxHandSize: 3,
-  cashInPoints: 1,
   playCooldownMs: 4_000,
   /** No cards in the opening and closing seconds of a round. */
   lockoutStartMs: 10_000,
@@ -60,24 +56,13 @@ export const CARD_RULES = {
 } as const;
 
 /**
- * Tiered draw by word length. The first matching row wins; `alt` is drawn instead with `altChance`.
- * Qu words: any word of `quMinLength`+ letters containing "qu" uses the legendary row.
+ * Every player is dealt a card every `settings.cardIntervalSeconds` while there's room in their hand.
+ * The tier of each dealt card is drawn with these weights (they don't need to sum to 1).
  */
-export interface DropRow {
-  minLength: number;
-  primary: CardTier;
-  alt?: CardTier;
-  altChance?: number;
-}
-
-export const DROP_TABLE: { quMinLength: number; legendary: DropRow; rows: DropRow[] } = {
-  quMinLength: 5,
-  legendary: { minLength: 8, primary: "legendary", alt: "rare", altChance: 0.3 },
-  rows: [
-    { minLength: 6, primary: "rare", alt: "common", altChance: 0.25 },
-    { minLength: 5, primary: "common", alt: "rare", altChance: 0.2 },
-    { minLength: 4, primary: "common" },
-  ],
+export const DROP_WEIGHTS: Record<CardTier, number> = {
+  common: 0.6,
+  rare: 0.3,
+  legendary: 0.1,
 };
 
 const card = (def: CardDefinition) => def;

@@ -238,7 +238,7 @@ export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = fa
           <div
             key={i}
             data-cell={i}
-            className="absolute p-[8%]"
+            className="absolute"
             style={{
               left: `${((slot % size) * 100) / size}%`,
               top: `${(Math.floor(slot / size) * 100) / size}%`,
@@ -251,7 +251,7 @@ export function SwipeBoard({ board, path, onPathChange, onDragEnd, disabled = fa
             aria-label={mods.locked ? `${tileLabel(tile)}, locked` : mods.hidden || inked ? "Hidden tile" : tileLabel(tile)}
           >
             <div
-              className={`relative grid h-full w-full place-items-center overflow-hidden rounded-[18%] font-black transition-colors duration-100 ${
+              className={`absolute inset-[8%] grid place-items-center overflow-hidden rounded-[18%] font-black leading-none transition-colors duration-100 ${
                 selected
                   ? "scale-95 bg-amber text-ink-950 shadow-[0_0.5cqw_0_#b37b00]"
                   : mods.locked

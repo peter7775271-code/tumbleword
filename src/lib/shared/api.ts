@@ -61,8 +61,8 @@ export interface MySabotage {
   immuneUntil: number;
   /** Earliest time the next card can be played (rate limit). */
   nextPlayAt: number;
-  /** Earliest time a word can earn another card. */
-  nextEarnAt: number;
+  /** When the next card is dealt; null if no more cards come this round. Deals skip while the hand is full. */
+  nextCardAt: number | null;
 }
 
 export interface PlayerView {
@@ -124,8 +124,6 @@ export interface SubmitResponse {
   /** Points if the word stays unique (accepted only). */
   points: number;
   count: number;
-  /** Sabotage reward for this word, if any. */
-  reward?: { kind: "card"; cardId: string } | { kind: "cashIn"; points: number };
   /** True when an active Bounty paid +1 for this word. */
   bounty?: boolean;
 }

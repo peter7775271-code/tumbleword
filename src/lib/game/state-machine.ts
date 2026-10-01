@@ -71,7 +71,7 @@ const LEGACY_PLAYER_KEYS = ["hand", "lastCardEarnedAt", "lastCardPlayedAt", "per
  */
 export function normalizeRoom(room: Room): Room {
   const settingsComplete = Object.keys(DEFAULT_SETTINGS).every((k) => k in (room.settings ?? {}));
-  const playersComplete = room.players.every((p) => p.sabotage && Array.isArray(p.sabotage.hand) && "cashIn" in p.sabotage);
+  const playersComplete = room.players.every((p) => p.sabotage && Array.isArray(p.sabotage.hand) && "nextCardAt" in p.sabotage);
   const eventsComplete = Array.isArray(room.eventLog) && room.eventLog.every((e) => typeof e === "object" && e !== null);
   if (
     settingsComplete &&
@@ -197,7 +197,7 @@ export function updateSettings(room: Room, patch: Partial<Settings>): void {
   if (typeof patch.minWords === "number") s.minWords = clamp(patch.minWords, SETTING_LIMITS.minWords);
   if (typeof patch.hints === "boolean") s.hints = patch.hints;
   if (typeof patch.sabotageEnabled === "boolean") s.sabotageEnabled = patch.sabotageEnabled;
-  if (typeof patch.cardMinLength === "number") s.cardMinLength = clamp(patch.cardMinLength, SETTING_LIMITS.cardMinLength);
+  if (typeof patch.cardIntervalSeconds === "number") s.cardIntervalSeconds = clamp(patch.cardIntervalSeconds, SETTING_LIMITS.cardIntervalSeconds);
 }
 
 // ---------- rounds ----------

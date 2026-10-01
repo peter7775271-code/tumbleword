@@ -23,7 +23,7 @@ function parseAction(value: unknown): RoomAction {
       if (typeof s.minWords === "number") settings.minWords = s.minWords;
       if (typeof s.hints === "boolean") settings.hints = s.hints;
       if (typeof s.sabotageEnabled === "boolean") settings.sabotageEnabled = s.sabotageEnabled;
-      if (typeof s.cardMinLength === "number") settings.cardMinLength = s.cardMinLength;
+      if (typeof s.cardIntervalSeconds === "number") settings.cardIntervalSeconds = s.cardIntervalSeconds;
       return { type: "settings", settings };
     }
     case "playCard":

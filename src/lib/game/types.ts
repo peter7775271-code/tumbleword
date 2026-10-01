@@ -16,8 +16,8 @@ export interface Settings {
   minWords: number;
   hints: boolean;
   sabotageEnabled: boolean;
-  /** Shortest valid word that awards a sabotage card. */
-  cardMinLength: number;
+  /** Each player is dealt a sabotage card this often (while their hand has room). */
+  cardIntervalSeconds: number;
 }
 
 export type PlayerStatus = "active" | "spectating";
@@ -38,8 +38,9 @@ export interface Player {
 export interface PlayerSabotage {
   /** Card ids. Private: only ever sent to this player. */
   hand: string[];
+  /** When the next card is dealt (0 until the round's first deal is scheduled). */
+  nextCardAt: number;
   /** 0 means never. */
-  lastCardEarnedAt: number;
   lastCardPlayedAt: number;
   /** Milliseconds removed from this player's deadline by Clock Thief (capped). */
   personalDeadlineOffset: number;
@@ -47,8 +48,6 @@ export interface PlayerSabotage {
   immuneUntil: number;
   /** Sabotages received this round (for the per-target cap). */
   hitsTaken: number;
-  /** Points from cashing in cards with a full hand. */
-  cashIn: number;
   /** Points earned from an active Bounty. */
   bountyBonus: number;
 }
@@ -82,7 +81,7 @@ export interface PlayerRoundResult {
   cancelledWords: string[];
   wordPoints: number;
   bonus: number;
-  /** Net points from sabotage cards (cash-ins, Bounty, Heist). Can be negative after a Heist. */
+  /** Net points from sabotage cards (Bounty, Heist). Can be negative after a Heist. */
   cardPoints: number;
   total: number;
 }
@@ -110,7 +109,6 @@ export interface SabotagePlayerStats {
   played: number;
   hits: number;
   reflects: number;
-  cashIn: number;
   bounty: number;
   /** Positive for the robber, negative for the robbed. */
   heist: number;

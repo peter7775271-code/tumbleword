@@ -16,7 +16,7 @@ function blockedReason(view: PlayerView, now: number): string | null {
   const window = cardWindow(round, now);
   if (window === "early") return `Cards unlock in ${Math.ceil((round.startsAt + CARD_RULES.lockoutStartMs - now) / 1000)}s`;
   if (window !== "open") return "Cards are locked for the final seconds";
-  if (view.sabotage.nextPlayAt > now) return `Next card in ${Math.ceil((view.sabotage.nextPlayAt - now) / 1000)}s`;
+  if (view.sabotage.nextPlayAt > now) return `You can play again in ${Math.ceil((view.sabotage.nextPlayAt - now) / 1000)}s`;
   return null;
 }
 
@@ -34,6 +34,8 @@ export function CardTray({ view, now, onPlay }: { view: PlayerView; now: number;
   const card = slot !== null ? hand[slot] : null;
   const blocked = blockedReason(view, now);
   const { players, progress, activeEffects } = view.room;
+  const nextCardAt = hand.length < CARD_RULES.maxHandSize ? view.sabotage.nextCardAt : null;
+  const nextIn = nextCardAt !== null ? Math.max(0, Math.ceil((nextCardAt - now) / 1000)) : null;
 
   const pick = (i: number) => {
     setOpen(true);
@@ -62,10 +64,18 @@ export function CardTray({ view, now, onPlay }: { view: PlayerView; now: number;
         <span className="text-xs font-black uppercase tracking-widest text-ink-300">
           Cards {hand.length}/{CARD_RULES.maxHandSize}
         </span>
+        {nextIn !== null && <span className="sr-only">Next card in {nextIn} seconds</span>}
         <div className="flex flex-1 gap-1.5">
           {Array.from({ length: CARD_RULES.maxHandSize }, (_, i) => {
             const c = hand[i];
-            if (!c) return <span key={`empty-${i}`} className="h-11 w-11 rounded-xl border-2 border-dashed border-ink-700" aria-hidden />;
+            if (!c) {
+              const countdown = i === hand.length && nextIn !== null ? `${nextIn}s` : "";
+              return (
+                <span key={`empty-${i}`} className="grid h-11 w-11 place-items-center rounded-xl border-2 border-dashed border-ink-700 text-xs font-black text-ink-300 tabular-nums" aria-hidden>
+                  {countdown}
+                </span>
+              );
+            }
             return (
               <button
                 key={`${c.id}-${i}`}
@@ -94,7 +104,7 @@ export function CardTray({ view, now, onPlay }: { view: PlayerView; now: number;
         <div className="mt-2 flex max-h-[45dvh] animate-fade-up flex-col gap-3 overflow-y-auto pb-1">
           {hand.length === 0 && (
             <p className="text-sm text-ink-300">
-              Find words of {Math.max(4, view.room.settings.cardMinLength)}+ letters to earn sabotage cards. Longer words (and Qu words) earn rarer ones.
+              You get a sabotage card every {view.room.settings.cardIntervalSeconds}s while your hand has room. Play them to free up slots.
             </p>
           )}
           {hand.length > 0 && !card && <p className="text-sm text-ink-300">Tap a card to see what it does.</p>}

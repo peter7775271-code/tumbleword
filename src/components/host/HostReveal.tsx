@@ -47,12 +47,12 @@ export function HostReveal({ view, act, busy }: HostControls) {
   const reducedMotion = useReducedMotion();
 
   const sab = result.sabotage;
-  const cardBonus = (id: string) => (sab?.players[id] ? sab.players[id].cashIn + sab.players[id].bounty : 0);
+  const cardBonus = (id: string) => sab?.players[id]?.bounty ?? 0;
   const steps = useMemo<Step[]>(() => {
     const dups = result.words.filter((w) => w.cancelled);
     // Ascending by points so the biggest words land last.
     const uniques = result.words.filter((w) => !w.cancelled).sort((a, b) => a.points - b.points || a.word.localeCompare(b.word));
-    const anyCardBonus = Object.values(result.sabotage?.players ?? {}).some((s) => s.cashIn + s.bounty > 0);
+    const anyCardBonus = Object.values(result.sabotage?.players ?? {}).some((s) => s.bounty > 0);
     return [
       { kind: "intro" },
       ...dups.map((word): Step => ({ kind: "dup", word })),
@@ -170,7 +170,7 @@ export function HostReveal({ view, act, busy }: HostControls) {
           )}
           {step.kind === "cards" && (
             <div className="animate-pop-in text-center">
-              <p className="text-[1.6rem] font-black uppercase tracking-[0.3em] text-sky">🃏 Card bonuses</p>
+              <p className="text-[1.6rem] font-black uppercase tracking-[0.3em] text-sky">👑 Bounty hunters</p>
               <ul className="mt-[1rem] flex flex-col gap-[0.5rem] text-[1.8rem] font-bold">
                 {players
                   .filter((p) => cardBonus(p.id) > 0)
@@ -178,11 +178,6 @@ export function HostReveal({ view, act, busy }: HostControls) {
                     <li key={p.id} className="flex items-center justify-center gap-[0.8rem]">
                       <PlayerName p={p} />
                       <span className="text-amber">+{cardBonus(p.id)}</span>
-                      <span className="text-[1.3rem] text-ink-300">
-                        {[sab!.players[p.id].cashIn > 0 && `cash-in ${sab!.players[p.id].cashIn}`, sab!.players[p.id].bounty > 0 && `👑 bounty ${sab!.players[p.id].bounty}`]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
                     </li>
                   ))}
               </ul>

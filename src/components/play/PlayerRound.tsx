@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { wordFromPath } from "@/lib/game/board";
-import { TIER_STYLE, getCard, type CardDefinition } from "@/lib/game/cards";
+import { CARD_RULES, TIER_STYLE, getCard, type CardDefinition } from "@/lib/game/cards";
 import { MIN_WORD_LENGTH } from "@/lib/game/constants";
 import { scoreWord } from "@/lib/game/scoring";
 import type { Auth, Hint, PlayerView, SubmitOutcome } from "@/lib/shared/api";
 import { ApiClientError, api } from "@/lib/client/api";
 import { useCalmEffects } from "@/lib/client/calm";
+import { serverClock } from "@/lib/client/clock";
 import { vibrate } from "@/lib/client/haptics";
 import { useServerNow } from "@/lib/client/hooks";
 import { play } from "@/lib/client/sound";
@@ -34,7 +35,7 @@ interface Feedback {
   id: number;
 }
 
-type Pop = { id: number; card: CardDefinition } | { id: number; cashIn: number };
+type Pop = { id: number; card: CardDefinition };
 
 export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView; auth: Auth; onView: (v: PlayerView) => void; refresh: () => Promise<void> }) {
   const round = view.room.round!;
@@ -45,7 +46,6 @@ export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView;
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [hint, setHint] = useState<{ round: number; hint: Hint } | null>(null);
   const [hintsLeft, setHintsLeft] = useState<number | null>(null);
-  const [pop, setPop] = useState<Pop | null>(null);
 
   // Server list (survives reloads) merged with words accepted since the last sync.
   const words = [...new Set([...view.myWords, ...accepted])];
@@ -75,6 +75,29 @@ export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView;
     if (latest) setAlert(latest);
   }
 
+  // "+ card" pop whenever a new card lands in my hand.
+  const hand = view.sabotage.hand;
+  const [lastHand, setLastHand] = useState(hand);
+  const [pop, setPop] = useState<Pop | null>(null);
+  if (hand !== lastHand) {
+    setLastHand(hand);
+    const card = hand.length > lastHand.length ? getCard(hand.at(-1)!) : undefined;
+    if (card) setPop((prev) => ({ id: (prev?.id ?? 0) + 1, card }));
+  }
+  useEffect(() => {
+    if (!pop) return;
+    vibrate("card");
+    play("card");
+  }, [pop]);
+
+  // Deals happen on the server whenever anyone syncs; ask for mine as soon as it's due.
+  const nextCardAt = hand.length < CARD_RULES.maxHandSize ? view.sabotage.nextCardAt : null;
+  useEffect(() => {
+    if (nextCardAt === null) return;
+    const id = window.setTimeout(() => void refresh(), Math.max(0, serverClock.toLocal(nextCardAt) - Date.now()) + 150);
+    return () => window.clearTimeout(id);
+  }, [nextCardAt, refresh]);
+
   useEffect(() => {
     if (!alert) return;
     vibrate(alert.tone === "good" ? "success" : "hit");
@@ -101,14 +124,6 @@ export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView;
       if (res.outcome !== "accepted") return say(false, MESSAGES[res.outcome]);
       setAccepted((a) => [...a, res.word]);
       say(true, `+${res.points}  ${res.word.toUpperCase()}${res.bounty ? "  👑+1" : ""}`);
-      const reward = res.reward;
-      if (reward) {
-        const card = reward.kind === "card" ? getCard(reward.cardId) : null;
-        setPop(card ? { id: Date.now(), card } : { id: Date.now(), cashIn: reward.kind === "cashIn" ? reward.points : 0 });
-        vibrate("card");
-        play("card");
-        void refresh();
-      }
     } catch (err) {
       say(false, err instanceof ApiClientError ? err.message : "Couldn't send, try again");
     }
@@ -242,13 +257,6 @@ export function PlayerRound({ view, auth, onView, refresh }: { view: PlayerView;
 
 /** "+ card" moment: tier color, icon and text together. */
 function CardPop({ pop }: { pop: Pop }) {
-  if ("cashIn" in pop) {
-    return (
-      <div role="status" className="pointer-events-none absolute inset-x-6 bottom-3 z-10 animate-card-pop rounded-2xl bg-amber px-3 py-2 text-center text-base font-black text-ink-950 shadow-xl">
-        🃏 Hand full, cashed in for +{pop.cashIn}
-      </div>
-    );
-  }
   const tier = TIER_STYLE[pop.card.tier];
   return (
     <div

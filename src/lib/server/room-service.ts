@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { HEARTBEAT_WRITE_MS, HINTS_PER_ROUND, MIN_WORD_LENGTH, ROOM_INACTIVE_MS, SUBMIT_GRACE_MS } from "@/lib/game/constants";
 import { generateBoard, type GeneratedBoard } from "@/lib/game/generator";
-import { applyBounty, awardCard, personalDeadline, playCard } from "@/lib/game/sabotage";
+import { applyBounty, dealCards, personalDeadline, playCard } from "@/lib/game/sabotage";
 import { scoreWord } from "@/lib/game/scoring";
 import { findPath, pathSpells } from "@/lib/game/solver";
 import {
@@ -84,11 +84,13 @@ export function createRoomService(deps: RoomServiceDeps) {
     return { actor: { kind: "player", playerId: player.id }, player };
   }
 
-  /** Applies time-driven transitions (countdown end, round end + scoring). */
+  /** Applies time-driven transitions (countdown end, card deals, round end + scoring). */
   async function tick(room: Room, now: number): Promise<void> {
     advanceTime(room, now);
     if (isRoundOver(room, now)) {
       finishRound(room, await store.listSubmissions(room.code, room.round!.number));
+    } else {
+      dealCards(room, now, rng);
     }
   }
 
@@ -262,14 +264,10 @@ export function createRoomService(deps: RoomServiceDeps) {
       const res = reply("accepted", added.count, scoreWord(word));
       if (!room.settings.sabotageEnabled) return res;
       const { result } = await mutate(code, (room, now) => {
-        if (room.phase !== "ROUND" || room.round?.number !== round.number) return null;
-        const award = awardCard(room, player.id, word, now, rng);
-        const bounty = applyBounty(room, player.id, word, now);
-        return { award, bounty };
+        if (room.phase !== "ROUND" || room.round?.number !== round.number) return false;
+        return applyBounty(room, player.id, word, now);
       });
-      if (result?.award.kind === "card") res.reward = { kind: "card", cardId: result.award.cardId };
-      if (result?.award.kind === "cashIn") res.reward = { kind: "cashIn", points: result.award.points };
-      if (result?.bounty) res.bounty = true;
+      if (result) res.bounty = true;
       return res;
     },
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { COUNTDOWN_MS, HOST_TIMEOUT_MS, PLAYER_TIMEOUT_MS, ROUND_SETTLE_MS, SUBMIT_GRACE_MS } from "@/lib/game/constants";
+import { COUNTDOWN_MS, DEFAULT_SETTINGS, HOST_TIMEOUT_MS, PLAYER_TIMEOUT_MS, ROUND_SETTLE_MS, SETTING_LIMITS, SUBMIT_GRACE_MS } from "@/lib/game/constants";
 import { mulberry32 } from "@/lib/game/rng";
 import { solve } from "@/lib/game/solver";
 import { Trie } from "@/lib/game/trie";
@@ -13,6 +13,8 @@ import { MemoryRoomStore } from "../store/memory";
 // plenty of "words", and solutions, hints and missed-word lists are never empty.
 const ALL_TILES = [..."abcdefghijklmnoprstuvwxyz", "qu"];
 const ALL_TRIGRAMS = ALL_TILES.flatMap((a) => ALL_TILES.flatMap((b) => ALL_TILES.map((c) => a + b + c)));
+/** Pushes the next card deal past the end of any round, for tests that set hands by hand. */
+const NO_DEALS = Number.MAX_SAFE_INTEGER;
 
 describe("room service", () => {
   let now: number;
@@ -44,15 +46,6 @@ describe("room service", () => {
     const stored = (await store.getRoom(code))!;
     fn(stored.room);
     await store.updateRoom(stored.room, stored.version);
-  }
-
-  /** Adds the first row of the board (4 adjacent tiles) to the dictionary and returns it with its path. */
-  async function fourLetterWord(code: string): Promise<{ word: string; path: number[] }> {
-    const board = (await store.getRoom(code))!.room.round!.board;
-    const path = [0, 1, 2, 3];
-    const word = path.map((i) => board.tiles[i]).join("");
-    dict = Trie.fromWords([...ALL_TRIGRAMS, word]);
-    return { word, path };
   }
 
   async function setup() {
@@ -174,25 +167,27 @@ describe("room service", () => {
   });
 
   describe("sabotage", () => {
-    it("awards cards on valid 4+ letter words, keeping hands private", async () => {
+    it("deals cards on a timer, keeping hands private", async () => {
       const { code, host, authA, authB } = await setup();
       await service.act(code, host, { type: "start" });
-      const { word, path } = await fourLetterWord(code);
-      const [trigram] = await boardWords(code);
       now += COUNTDOWN_MS;
+      const round = (await store.getRoom(code))!.room.round!;
+      const interval = DEFAULT_SETTINGS.cardIntervalSeconds * 1000;
 
-      const three = await service.submit(code, authA, trigram, null);
-      expect(three).toMatchObject({ outcome: "accepted" });
-      expect(three.reward).toBeUndefined();
-      const res = await service.submit(code, authA, word, path);
-      expect(res.outcome).toBe("accepted");
-      expect(res.reward).toMatchObject({ kind: "card" });
+      const before = (await service.sync(code, authA)) as PlayerView;
+      expect(before.sabotage.hand).toEqual([]);
+      expect(before.sabotage.nextCardAt).toBe(round.startsAt + interval);
 
+      now = round.startsAt + interval;
+      events = [];
       const a = (await service.sync(code, authA)) as PlayerView;
+      expect(a.sabotage.hand).toHaveLength(1);
+      expect(a.sabotage.nextCardAt).toBe(round.startsAt + 2 * interval);
+      expect(events.some((e) => e.type === "sync")).toBe(true);
+
       const b = (await service.sync(code, authB)) as PlayerView;
       const hostView = await service.sync(code, host);
-      expect(a.sabotage.hand).toHaveLength(1);
-      expect(b.sabotage.hand).toEqual([]);
+      expect(b.sabotage.hand).toHaveLength(1);
       expect(b.room.players.find((p) => p.id === a.me.id)!.cardCount).toBe(1);
       expect(JSON.stringify(hostView)).not.toContain('"hand"');
       expect(JSON.stringify(b.room)).not.toContain('"hand"');
@@ -205,6 +200,7 @@ describe("room service", () => {
       now += COUNTDOWN_MS;
       await editRoom(code, (room) => {
         room.phase = "ROUND";
+        for (const p of room.players) p.sabotage.nextCardAt = NO_DEALS;
         room.players.find((p) => p.id === authA.playerId)!.sabotage.hand = ["fog-machine", "shield"];
       });
       await expect(service.act(code, authA, { type: "playCard", cardId: "fog-machine", targetId: authB.playerId })).rejects.toMatchObject({ code: "locked_early" });
@@ -269,16 +265,15 @@ describe("room service", () => {
       expect(next.room.events).toEqual([]);
     });
 
-    it("lets the host toggle sabotage and the card length", async () => {
+    it("lets the host toggle sabotage and the card interval", async () => {
       const { code, host, authA } = await setup();
-      const view = await service.act(code, host, { type: "settings", settings: { sabotageEnabled: false, cardMinLength: 2 } });
-      expect(view!.room.settings).toMatchObject({ sabotageEnabled: false, cardMinLength: 4 });
+      const view = await service.act(code, host, { type: "settings", settings: { sabotageEnabled: false, cardIntervalSeconds: 0 } });
+      expect(view!.room.settings).toMatchObject({ sabotageEnabled: false, cardIntervalSeconds: SETTING_LIMITS.cardIntervalSeconds.min });
       await service.act(code, host, { type: "start" });
-      const { word, path } = await fourLetterWord(code);
-      now += COUNTDOWN_MS;
-      const res = await service.submit(code, authA, word, path);
-      expect(res.outcome).toBe("accepted");
-      expect(res.reward).toBeUndefined();
+      now += COUNTDOWN_MS + 30_000;
+      const a = (await service.sync(code, authA)) as PlayerView;
+      expect(a.sabotage.hand).toEqual([]);
+      expect(a.sabotage.nextCardAt).toBeNull();
     });
   });
 

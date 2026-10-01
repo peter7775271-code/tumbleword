@@ -152,12 +152,12 @@ export function HostLobby({ view, connected, act, busy, error, joinUrl }: HostCo
           <Toggle label="Hints" value={settings.hints} onChange={(hints) => setSetting({ hints })} />
           <Toggle label="🃏 Sabotage cards" value={settings.sabotageEnabled} onChange={(sabotageEnabled) => setSetting({ sabotageEnabled })} />
           <Stepper
-            label="Card word length"
-            value={settings.cardMinLength}
-            display={`${settings.cardMinLength}+`}
-            limits={SETTING_LIMITS.cardMinLength}
+            label="New card every"
+            value={settings.cardIntervalSeconds}
+            display={`${settings.cardIntervalSeconds}s`}
+            limits={SETTING_LIMITS.cardIntervalSeconds}
             disabled={!settings.sabotageEnabled}
-            onChange={(cardMinLength) => setSetting({ cardMinLength })}
+            onChange={(cardIntervalSeconds) => setSetting({ cardIntervalSeconds })}
           />
         </div>
 

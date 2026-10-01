@@ -29,15 +29,14 @@ export const DEFAULT_SETTINGS: Settings = {
   minWords: 40,
   hints: true,
   sabotageEnabled: true,
-  cardMinLength: 4,
+  cardIntervalSeconds: 5,
 };
 
 export const SETTING_LIMITS = {
   rounds: { min: 1, max: 10, step: 1 },
   roundSeconds: { min: 30, max: 300, step: 30 },
   minWords: { min: 0, max: 150, step: 10 },
-  /** 3-letter words never award cards. */
-  cardMinLength: { min: 4, max: 8, step: 1 },
+  cardIntervalSeconds: { min: 2, max: 20, step: 1 },
 } as const;
 
 /** Okabe-Ito palette (colorblind-safe), extended to 8 with a neutral. */

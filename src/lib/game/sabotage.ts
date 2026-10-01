@@ -1,4 +1,4 @@
-import { CARD_RULES as R, CHAOS_POOL, DROP_TABLE, cardsInTier, getCard, type CardDefinition, type CardTier } from "./cards";
+import { CARD_RULES as R, CHAOS_POOL, DROP_WEIGHTS, cardsInTier, getCard, type CardDefinition, type CardTier } from "./cards";
 import { PLAYER_TIMEOUT_MS } from "./constants";
 import { shuffle, type Rng } from "./rng";
 import type {
@@ -21,7 +21,7 @@ import type {
  */
 
 export function freshSabotage(): PlayerSabotage {
-  return { hand: [], lastCardEarnedAt: 0, lastCardPlayedAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, hitsTaken: 0, cashIn: 0, bountyBonus: 0 };
+  return { hand: [], nextCardAt: 0, lastCardPlayedAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, hitsTaken: 0, bountyBonus: 0 };
 }
 
 /** Drops every hand, effect and pending card so nothing leaks into the next round. */
@@ -34,47 +34,66 @@ export function clearSabotage(room: Room): void {
 
 const isConnected = (p: ServerPlayer, now: number) => now - p.lastSeenAt < PLAYER_TIMEOUT_MS;
 
-// ---------- earning ----------
+// ---------- dealing ----------
 
-/** Card letters count: "qu" is two letters, like scoring. */
-export function drawTier(word: string, rng: Rng): CardTier | null {
-  const len = word.length;
-  const legendary = len >= DROP_TABLE.legendary.minLength || (len >= DROP_TABLE.quMinLength && word.includes("qu"));
-  const row = legendary ? DROP_TABLE.legendary : DROP_TABLE.rows.find((r) => len >= r.minLength);
-  if (!row || len < R.absoluteMinWordLength) return null;
-  if (row.alt && row.altChance && rng() < row.altChance) return row.alt;
-  return row.primary;
-}
-
-export function drawCard(word: string, rng: Rng): CardDefinition | null {
-  const tier = drawTier(word, rng);
-  if (!tier) return null;
-  const pool = cardsInTier(tier);
-  return pool[Math.floor(rng() * pool.length)] ?? null;
-}
-
-export type AwardResult =
-  | { kind: "none"; reason: "disabled" | "too_short" | "cooldown" | "no_player" }
-  | { kind: "card"; cardId: string }
-  | { kind: "cashIn"; points: number };
-
-/** Called once a word has been validated and stored. Never affects the word's own score. */
-export function awardCard(room: Room, playerId: string, word: string, now: number, rng: Rng = Math.random): AwardResult {
-  const player = room.players.find((p) => p.id === playerId);
-  if (!player) return { kind: "none", reason: "no_player" };
-  if (!room.settings.sabotageEnabled) return { kind: "none", reason: "disabled" };
-  if (word.length < Math.max(R.absoluteMinWordLength, room.settings.cardMinLength)) return { kind: "none", reason: "too_short" };
-  const s = player.sabotage;
-  if (s.lastCardEarnedAt > 0 && now - s.lastCardEarnedAt < R.earnCooldownMs) return { kind: "none", reason: "cooldown" };
-  const card = drawCard(word, rng);
-  if (!card) return { kind: "none", reason: "too_short" };
-  s.lastCardEarnedAt = now;
-  if (s.hand.length >= R.maxHandSize) {
-    s.cashIn += R.cashInPoints;
-    return { kind: "cashIn", points: R.cashInPoints };
+export function drawTier(rng: Rng): CardTier {
+  const tiers = Object.entries(DROP_WEIGHTS) as [CardTier, number][];
+  let roll = rng() * tiers.reduce((sum, [, w]) => sum + w, 0);
+  for (const [tier, weight] of tiers) {
+    roll -= weight;
+    if (roll < 0) return tier;
   }
-  s.hand.push(card.id);
-  return { kind: "card", cardId: card.id };
+  return tiers[0][0];
+}
+
+export function drawCard(rng: Rng): CardDefinition {
+  const pool = cardsInTier(drawTier(rng));
+  return pool[Math.floor(rng() * pool.length)] ?? pool[0];
+}
+
+/** Dealing stops once cards can no longer be played (closing lockout or this player's own deadline). */
+function dealStop(round: Round, s: PlayerSabotage): number {
+  return Math.min(round.endsAt - R.lockoutEndMs, personalDeadline(round, s));
+}
+
+export const cardInterval = (room: Pick<Room, "settings">) => room.settings.cardIntervalSeconds * 1000;
+
+/** First deal of the round: one interval after the round starts. */
+export const firstDealAt = (room: Pick<Room, "settings">, round: Pick<Round, "startsAt">) => round.startsAt + cardInterval(room);
+
+/** When this player's next card is dealt, or null if no more cards come this round. */
+export function nextDealAt(room: Room, player: ServerPlayer): number | null {
+  const round = room.round;
+  if (!room.settings.sabotageEnabled || !round || player.status !== "active") return null;
+  if (room.phase !== "ROUND" && room.phase !== "COUNTDOWN") return null;
+  const at = player.sabotage.nextCardAt || firstDealAt(room, round);
+  return at < dealStop(round, player.sabotage) ? at : null;
+}
+
+/**
+ * Deals every card that has come due since the last call. Serverless has no timers, so this runs
+ * lazily on every request (clients also refresh when their next card is due). A deal that finds a
+ * full hand is skipped. Returns the ids of players who received cards.
+ */
+export function dealCards(room: Room, now: number, rng: Rng = Math.random): string[] {
+  const round = room.round;
+  if (!room.settings.sabotageEnabled || room.phase !== "ROUND" || !round || now < round.startsAt) return [];
+  const interval = cardInterval(room);
+  const dealt: string[] = [];
+  for (const p of room.players) {
+    if (p.status !== "active") continue;
+    const s = p.sabotage;
+    if (s.nextCardAt === 0) s.nextCardAt = firstDealAt(room, round);
+    const stop = dealStop(round, s);
+    while (s.nextCardAt <= now && s.nextCardAt < stop) {
+      if (s.hand.length < R.maxHandSize) {
+        s.hand.push(drawCard(rng).id);
+        if (!dealt.includes(p.id)) dealt.push(p.id);
+      }
+      s.nextCardAt += interval;
+    }
+  }
+  return dealt;
 }
 
 export function activeBounty(room: Room, now: number): ActiveEffect | null {
@@ -370,10 +389,10 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId:
 
 // ---------- round end ----------
 
-const emptyStats = (): SabotagePlayerStats => ({ played: 0, hits: 0, reflects: 0, cashIn: 0, bounty: 0, heist: 0 });
+const emptyStats = (): SabotagePlayerStats => ({ played: 0, hits: 0, reflects: 0, bounty: 0, heist: 0 });
 
 /**
- * Folds the round's card points (cash-ins, Bounty, Heist) into the scored result and records
+ * Folds the round's card points (Bounty, Heist) into the scored result and records
  * stats for the reveal. Heists only take unique-word points and never push the victim below 0.
  */
 export function resolveRoundSabotage(room: Room, result: RoundResult): void {
@@ -385,7 +404,6 @@ export function resolveRoundSabotage(room: Room, result: RoundResult): void {
   for (const p of room.players) {
     const r = result.players[p.id];
     if (!r) continue;
-    stat(p.id).cashIn = p.sabotage.cashIn;
     stat(p.id).bounty = p.sabotage.bountyBonus;
   }
 
@@ -415,7 +433,7 @@ export function resolveRoundSabotage(room: Room, result: RoundResult): void {
 
   for (const [id, r] of Object.entries(result.players)) {
     const s = players[id];
-    r.cardPoints = s.cashIn + s.bounty + s.heist;
+    r.cardPoints = s.bounty + s.heist;
     r.total = r.wordPoints + r.bonus + r.cardPoints;
   }
   result.sabotage = { players, heists, reflects };

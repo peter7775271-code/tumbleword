@@ -102,7 +102,7 @@ export function PlayerLobby({ view, auth, onView, onLeave }: { view: PlayerView;
           {settings.rounds} rounds · {settings.roundSeconds}s each · {players.length} player{players.length === 1 ? "" : "s"}
         </p>
         <p className="mt-1 text-sm text-ink-300">
-          {settings.sabotageEnabled ? `🃏 Sabotage cards on: ${settings.cardMinLength}+ letter words earn cards` : "Sabotage cards off"}
+          {settings.sabotageEnabled ? `🃏 Sabotage cards on: a new card every ${settings.cardIntervalSeconds}s` : "Sabotage cards off"}
         </p>
       </Panel>
       {settings.sabotageEnabled && (
@@ -187,12 +187,14 @@ export function PlayerReveal({ view, auth, onView }: { view: PlayerView; auth: A
             {mine.uniqueWords.length} unique · {mine.cancelledWords.length} cancelled
             {mine.bonus > 0 && <span className="font-bold text-amber"> · longest word +{mine.bonus}!</span>}
           </p>
-          {cards && (cards.cashIn > 0 || cards.bounty > 0 || cards.heist !== 0) && (
+          {cards && (cards.bounty > 0 || cards.heist !== 0) && (
             <p className="mt-1 text-sm font-bold text-ink-300">
-              Cards:{cards.cashIn > 0 && ` 🃏 cash-in +${cards.cashIn}`}
-              {cards.bounty > 0 && ` · 👑 bounty +${cards.bounty}`}
-              {robbed.map((h) => ` · 💰 robbed ${name(h.targetId)} +${h.points}`)}
-              {robbedBy.map((h) => ` · 💰 stolen −${h.points}`)}
+              Cards:{" "}
+              {[
+                ...(cards.bounty > 0 ? [`👑 bounty +${cards.bounty}`] : []),
+                ...robbed.map((h) => `💰 robbed ${name(h.targetId)} +${h.points}`),
+                ...robbedBy.map((h) => `💰 stolen −${h.points}`),
+              ].join(" · ")}
             </p>
           )}
           <p className="mt-2 text-lg font-bold">Total: {view.me.score}</p>

@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { boardFromRows } from "../board";
-import { CARD_RULES, CHAOS_POOL, getCard } from "../cards";
+import { CARD_RULES, CHAOS_POOL, DROP_WEIGHTS, getCard } from "../cards";
 import { mulberry32 } from "../rng";
 import {
   aggregateSabotage,
   applyBounty,
-  awardCard,
+  dealCards,
   drawCard,
   drawTier,
   findBountyTarget,
+  nextDealAt,
   playCard,
   resolveRoundSabotage,
   sabotageAwards,
@@ -53,66 +54,77 @@ function play(room: Room, id: string, cardId: string, target: string | null, now
   return playCard(room, id, cardId, target, now, { rng: mulberry32(7), progress });
 }
 
-describe("card awards", () => {
-  it("draws tiers by word length", () => {
-    expect(drawTier("cat", always(0))).toBeNull();
-    expect(drawTier("cats", always(0))).toBe("common");
-    expect(drawTier("cats", always(0.99))).toBe("common");
-    expect(drawTier("crane", always(0.19))).toBe("rare");
-    expect(drawTier("crane", always(0.2))).toBe("common");
-    expect(drawTier("planet", always(0.24))).toBe("common");
-    expect(drawTier("planets", always(0.25))).toBe("rare");
-    expect(drawTier("triangle", always(0.29))).toBe("rare");
-    expect(drawTier("triangle", always(0.3))).toBe("legendary");
-    expect(drawTier("quilt", always(0.5))).toBe("legendary");
-    // Qu only upgrades words of 5+ letters
-    expect(drawTier("quit", always(0.5))).toBe("common");
+describe("card dealing", () => {
+  const INTERVAL = 5_000;
+
+  it("draws tiers by the configured weights", () => {
+    expect(drawTier(always(0))).toBe("common");
+    expect(drawTier(always(0.59))).toBe("common");
+    expect(drawTier(always(0.61))).toBe("rare");
+    expect(drawTier(always(0.89))).toBe("rare");
+    expect(drawTier(always(0.91))).toBe("legendary");
+    expect(drawTier(always(0.999))).toBe("legendary");
   });
 
   it("matches the configured probability splits with a seeded RNG", () => {
-    const rate = (word: string, tier: string) => {
-      const rng = mulberry32(42);
-      let hits = 0;
-      for (let i = 0; i < 20_000; i++) if (drawCard(word, rng)!.tier === tier) hits++;
-      return hits / 20_000;
-    };
-    expect(rate("cats", "common")).toBe(1);
-    expect(rate("crane", "rare")).toBeCloseTo(0.2, 1);
-    expect(rate("planet", "common")).toBeCloseTo(0.25, 1);
-    expect(rate("planets", "legendary")).toBe(0);
-    expect(rate("triangle", "rare")).toBeCloseTo(0.3, 1);
-    expect(rate("quilt", "legendary")).toBeCloseTo(0.7, 1);
+    const rng = mulberry32(42);
+    const counts: Record<string, number> = { common: 0, rare: 0, legendary: 0 };
+    for (let i = 0; i < 20_000; i++) counts[drawCard(rng).tier]++;
+    expect(counts.common / 20_000).toBeCloseTo(DROP_WEIGHTS.common, 1);
+    expect(counts.rare / 20_000).toBeCloseTo(DROP_WEIGHTS.rare, 1);
+    expect(counts.legendary / 20_000).toBeCloseTo(DROP_WEIGHTS.legendary, 1);
   });
 
-  it("never awards for 3-letter words and honours the host's minimum length", () => {
+  it("deals every active player a card each interval", () => {
     const room = liveRoom();
-    expect(awardCard(room, "p0", "cat", 1_000, always(0))).toMatchObject({ kind: "none", reason: "too_short" });
-    room.settings.cardMinLength = 6;
-    expect(awardCard(room, "p0", "crane", 1_000, always(0))).toMatchObject({ kind: "none", reason: "too_short" });
-    expect(awardCard(room, "p0", "planet", 1_000, always(0))).toMatchObject({ kind: "card" });
-    room.settings.sabotageEnabled = false;
-    expect(awardCard(room, "p0", "planet", 99_000, always(0))).toMatchObject({ kind: "none", reason: "disabled" });
+    room.settings.cardIntervalSeconds = INTERVAL / 1000;
+    expect(dealCards(room, INTERVAL - 1, always(0))).toEqual([]);
+    expect(dealCards(room, INTERVAL, always(0))).toEqual(["p0", "p1", "p2"]);
+    expect(player(room, "p0").sabotage.hand).toHaveLength(1);
+    expect(nextDealAt(room, player(room, "p0"))).toBe(2 * INTERVAL);
+    // Calling again before the next deal does nothing.
+    expect(dealCards(room, 2 * INTERVAL - 1, always(0))).toEqual([]);
+    expect(player(room, "p0").sabotage.hand).toHaveLength(1);
   });
 
-  it("enforces the earn cooldown", () => {
-    const room = liveRoom();
-    expect(awardCard(room, "p0", "cats", 1_000, always(0)).kind).toBe("card");
-    expect(awardCard(room, "p0", "dogs", 1_000 + CARD_RULES.earnCooldownMs - 1, always(0))).toMatchObject({ kind: "none", reason: "cooldown" });
-    expect(awardCard(room, "p0", "dogs", 1_000 + CARD_RULES.earnCooldownMs, always(0)).kind).toBe("card");
+  it("catches up on missed deals but never overfills the hand", () => {
+    const room = liveRoom(1);
+    room.settings.cardIntervalSeconds = INTERVAL / 1000;
+    dealCards(room, 2 * INTERVAL, always(0));
     expect(player(room, "p0").sabotage.hand).toHaveLength(2);
+    dealCards(room, 10 * INTERVAL, always(0));
+    expect(player(room, "p0").sabotage.hand).toHaveLength(CARD_RULES.maxHandSize);
+    // Deals that hit a full hand are skipped, not queued.
+    player(room, "p0").sabotage.hand.pop();
+    dealCards(room, 10 * INTERVAL + 1, always(0));
+    expect(player(room, "p0").sabotage.hand).toHaveLength(CARD_RULES.maxHandSize - 1);
+    dealCards(room, 11 * INTERVAL, always(0));
+    expect(player(room, "p0").sabotage.hand).toHaveLength(CARD_RULES.maxHandSize);
   });
 
-  it("cashes in for +1 when the hand is full", () => {
-    const room = liveRoom();
+  it("skips spectators, stops before the closing lockout, and respects the toggle", () => {
+    const room = liveRoom(2);
+    player(room, "p1").status = "spectating";
+    expect(dealCards(room, INTERVAL, always(0))).toEqual(["p0"]);
+    expect(nextDealAt(room, player(room, "p1"))).toBeNull();
+
+    const late = liveRoom(1);
+    player(late, "p0").sabotage.nextCardAt = END - CARD_RULES.lockoutEndMs;
+    expect(dealCards(late, END - 1, always(0))).toEqual([]);
+    expect(nextDealAt(late, player(late, "p0"))).toBeNull();
+
+    const off = liveRoom(1);
+    off.settings.sabotageEnabled = false;
+    expect(dealCards(off, INTERVAL, always(0))).toEqual([]);
+    expect(nextDealAt(off, player(off, "p0"))).toBeNull();
+  });
+
+  it("stops dealing once Clock Thief has run out a player's time", () => {
+    const room = liveRoom(1);
     const p = player(room, "p0");
-    p.sabotage.hand = ["padlock", "padlock", "padlock"];
-    expect(awardCard(room, "p0", "cats", 1_000, always(0))).toEqual({ kind: "cashIn", points: 1 });
-    expect(p.sabotage.hand).toHaveLength(3);
-    // cash-ins respect the cooldown too
-    expect(awardCard(room, "p0", "dogs", 2_000, always(0)).kind).toBe("none");
-    finishRound(room, [{ round: 1, playerId: "p0", word: "cats", submittedAt: 0 }]);
-    // 1 word point + 3 longest-word bonus + 1 cash-in
-    expect(room.history[0].players.p0).toMatchObject({ wordPoints: 1, bonus: 3, cardPoints: 1, total: 5 });
+    p.sabotage.personalDeadlineOffset = END - 3 * INTERVAL;
+    dealCards(room, END, always(0));
+    expect(p.sabotage.hand).toHaveLength(2);
   });
 });
 
