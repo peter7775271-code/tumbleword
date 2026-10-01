@@ -62,12 +62,17 @@ function HostAppInner() {
     }
   }, []);
 
-  // No room yet, or the saved one is gone: make a new one.
+  // The code of the room this screen has actually shown, so a room vanishing mid-game is never silently replaced.
+  const [liveCode, setLiveCode] = useState<string | null>(null);
+  if (conn.view && session && liveCode !== session.code) setLiveCode(session.code);
+  const roomLost = !!conn.error && !!session && liveCode === session.code;
+
+  // No room yet, or a stale saved one from an earlier visit: make a new one.
   useEffect(() => {
     // State is only set after the network round-trip resolves.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!session || conn.error) void createRoom();
-  }, [session, conn.error, createRoom]);
+    if (!session || (conn.error && !roomLost)) void createRoom();
+  }, [session, conn.error, roomLost, createRoom]);
 
   const act = useCallback(
     async (action: RoomAction) => {
@@ -103,6 +108,18 @@ function HostAppInner() {
     if (phase === "FINAL") play("fanfare");
     prevPhase.current = phase;
   }, [phase]);
+
+  if (roomLost) {
+    return (
+      <main className="flex flex-1 flex-col items-center justify-center gap-8">
+        <Logo className="text-6xl" />
+        <p className="text-3xl text-ink-300">{conn.error?.message ?? "This room has ended"}</p>
+        <button type="button" onClick={() => void newRoom()} className="rounded-2xl bg-amber px-8 py-4 text-3xl font-black text-ink-950 focus:ring-8 focus:ring-sky">
+          New room
+        </button>
+      </main>
+    );
+  }
 
   const view = conn.view;
   if (!view || !session) {

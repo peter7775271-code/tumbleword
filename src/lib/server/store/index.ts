@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { GameError } from "@/lib/game/state-machine";
 import { supabaseServerEnv } from "../env";
 import { MemoryRoomStore } from "./memory";
 import { SupabaseRoomStore } from "./supabase";
@@ -23,10 +24,14 @@ export function getStore(): RoomStore {
     const admin = getSupabaseAdmin();
     if (admin) {
       g.__tumblewordStore = new SupabaseRoomStore(admin);
+    } else if (process.env.VERCEL) {
+      // Serverless instances don't share memory, so rooms would vanish between requests.
+      throw new GameError(
+        "not_configured",
+        "Server not configured: set the Supabase environment variables (see README).",
+        503,
+      );
     } else {
-      if (process.env.VERCEL) {
-        console.warn("[tumbleword] Supabase env vars missing: using the in-memory store, which breaks across serverless instances.");
-      }
       g.__tumblewordStore = new MemoryRoomStore();
     }
   }
