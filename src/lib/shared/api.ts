@@ -59,8 +59,6 @@ export interface MySabotage {
   deadline: number | null;
   clockStolenMs: number;
   immuneUntil: number;
-  /** Earliest time the next card can be played (rate limit). */
-  nextPlayAt: number;
   /** When the next card is dealt; null if no more cards come this round. Deals skip while the hand is full. */
   nextCardAt: number | null;
 }

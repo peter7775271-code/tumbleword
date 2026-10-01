@@ -149,13 +149,12 @@ describe("playing cards", () => {
     expect(play(room, "p0", "padlock", "p2", 50_000)).toMatchObject({ ok: false, reason: "wrong_phase" });
   });
 
-  it("rate limits each player to one card every 4 seconds", () => {
+  it("lets a player fire cards back to back", () => {
     const room = liveRoom();
     expect(play(room, "p0", "padlock", "p1", OPEN).ok).toBe(true);
-    const blocked = play(room, "p0", "tiny-print", "p2", OPEN + CARD_RULES.playCooldownMs - 1);
-    expect(blocked).toMatchObject({ ok: false, reason: "rate_limited" });
-    expect(player(room, "p0").sabotage.hand).toEqual(["tiny-print"]);
-    expect(playCard(room, "p0", "tiny-print", "p2", OPEN + CARD_RULES.playCooldownMs).ok).toBe(true);
+    expect(play(room, "p0", "tiny-print", "p2", OPEN).ok).toBe(true);
+    expect(play(room, "p0", "shield", null, OPEN).ok).toBe(true);
+    expect(player(room, "p0").sabotage.hand).toEqual([]);
   });
 
   it("refuses self-targeting, disconnected and spectating rivals", () => {
@@ -174,7 +173,7 @@ describe("playing cards", () => {
     const attackers = ["p2", "p3", "p2"];
     for (let i = 0; i < 3; i++) {
       expect(play(room, attackers[i], cards[i], "p1", t).ok).toBe(true);
-      t += CARD_RULES.hitImmunityMs + CARD_RULES.playCooldownMs;
+      t += CARD_RULES.hitImmunityMs;
     }
     const third = room.activeEffects.find((e) => e.cardId === "tiny-print")!;
     expect(third.expiresAt - third.startedAt).toBe(8_000 * CARD_RULES.reducedDurationFactor);
@@ -195,11 +194,9 @@ describe("playing cards", () => {
   it("refunds a card whose effect is already active on the target", () => {
     const room = liveRoom();
     expect(play(room, "p0", "fog-machine", "p1", OPEN).ok).toBe(true);
-    const before = player(room, "p2").sabotage.lastCardPlayedAt;
     const again = play(room, "p2", "fog-machine", "p1", OPEN + 4_000);
     expect(again).toMatchObject({ ok: false, reason: "already_active" });
     expect(player(room, "p2").sabotage.hand).toEqual(["fog-machine"]);
-    expect(player(room, "p2").sabotage.lastCardPlayedAt).toBe(before);
     expect(room.activeEffects).toHaveLength(1);
     // once it expires the same effect can land again
     expect(playCard(room, "p2", "fog-machine", "p1", OPEN + 8_000).ok).toBe(true);

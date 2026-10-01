@@ -29,7 +29,6 @@ export interface CardDefinition {
 
 export const CARD_RULES = {
   maxHandSize: 3,
-  playCooldownMs: 4_000,
   /** No cards in the opening and closing seconds of a round. */
   lockoutStartMs: 10_000,
   lockoutEndMs: 8_000,

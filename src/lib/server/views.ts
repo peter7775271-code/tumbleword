@@ -81,7 +81,6 @@ export function playerView(room: Room, publicRoom: PublicRoom, player: ServerPla
       deadline: room.round ? personalDeadline(room.round, s) : null,
       clockStolenMs: s.personalDeadlineOffset,
       immuneUntil: s.immuneUntil,
-      nextPlayAt: s.lastCardPlayedAt > 0 ? s.lastCardPlayedAt + CARD_RULES.playCooldownMs : 0,
       nextCardAt: nextDealAt(room, player),
     },
     myWords,

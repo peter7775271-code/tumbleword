@@ -16,7 +16,6 @@ function blockedReason(view: PlayerView, now: number): string | null {
   const window = cardWindow(round, now);
   if (window === "early") return `Cards unlock in ${Math.ceil((round.startsAt + CARD_RULES.lockoutStartMs - now) / 1000)}s`;
   if (window !== "open") return "Cards are locked for the final seconds";
-  if (view.sabotage.nextPlayAt > now) return `You can play again in ${Math.ceil((view.sabotage.nextPlayAt - now) / 1000)}s`;
   return null;
 }
 

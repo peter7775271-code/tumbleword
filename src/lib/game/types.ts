@@ -40,8 +40,6 @@ export interface PlayerSabotage {
   hand: string[];
   /** When the next card is dealt (0 until the round's first deal is scheduled). */
   nextCardAt: number;
-  /** 0 means never. */
-  lastCardPlayedAt: number;
   /** Milliseconds removed from this player's deadline by Clock Thief (capped). */
   personalDeadlineOffset: number;
   /** New effects bounce off until this time (hit immunity, Cleanse). */

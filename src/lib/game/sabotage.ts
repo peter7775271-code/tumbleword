@@ -21,7 +21,7 @@ import type {
  */
 
 export function freshSabotage(): PlayerSabotage {
-  return { hand: [], nextCardAt: 0, lastCardPlayedAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, hitsTaken: 0, bountyBonus: 0 };
+  return { hand: [], nextCardAt: 0, personalDeadlineOffset: 0, immuneUntil: 0, hitsTaken: 0, bountyBonus: 0 };
 }
 
 /** Drops every hand, effect and pending card so nothing leaks into the next round. */
@@ -167,7 +167,6 @@ export type PlayFailure =
   | "locked_late"
   | "out_of_time"
   | "not_in_hand"
-  | "rate_limited"
   | "no_target"
   | "self_target"
   | "target_offline"
@@ -302,10 +301,6 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId:
   if (now >= personalDeadline(round, player.sabotage)) return fail("out_of_time", "Your time is up");
   const handIndex = player.sabotage.hand.indexOf(cardId);
   if (handIndex < 0) return fail("not_in_hand", "That card isn't in your hand");
-  const sinceLast = now - player.sabotage.lastCardPlayedAt;
-  if (player.sabotage.lastCardPlayedAt > 0 && sinceLast < R.playCooldownMs) {
-    return fail("rate_limited", `Next card in ${Math.ceil((R.playCooldownMs - sinceLast) / 1000)}s`);
-  }
 
   pruneExpired(room, now);
   const eligible = (p: ServerPlayer) => p.id !== playerId && p.status === "active" && isConnected(p, now);
@@ -381,7 +376,6 @@ export function playCard(room: Room, playerId: string, cardId: string, targetId:
   }
 
   player.sabotage.hand.splice(handIndex, 1);
-  player.sabotage.lastCardPlayedAt = now;
   event.id = nextId(room, "ev-");
   room.eventLog.push(event);
   return { ok: true, event };

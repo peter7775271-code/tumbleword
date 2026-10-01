@@ -219,7 +219,6 @@ describe("room service", () => {
       const reclaimA = await service.join(code, { nickname: "Ada" });
       expect(reclaimA.playerId).toBe(authA.playerId);
       expect(reclaimA.view.sabotage.hand).toEqual(["shield"]);
-      expect(reclaimA.view.sabotage.nextPlayAt).toBeGreaterThan(0);
     });
 
     it("rejects submissions after a Clock Thief deadline", async () => {
